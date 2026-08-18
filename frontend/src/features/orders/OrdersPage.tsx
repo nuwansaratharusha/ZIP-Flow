@@ -1,13 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../components/Icon'
+import { formatMoney } from '../../lib/currency'
 import { getOrder, getOrders, setOrderStatus } from './api'
 import { ORDER_STATUSES, type Order, type OrderStatus } from './types'
-
-const currency = new Intl.NumberFormat('en-LK', {
-  style: 'currency',
-  currency: 'LKR',
-  minimumFractionDigits: 0,
-})
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', month: 'short', day: '2-digit' })
 
@@ -118,7 +113,7 @@ export function OrdersPage() {
                 <span>{order.serviceMode}</span>
                 <span className="muted">{order.lines.map((l) => `${l.quantity}× ${l.name}`).join(', ')}</span>
                 <span className="muted">{order.paymentMethod ?? '—'}</span>
-                <span className="menu-item-name">{currency.format(order.total)}</span>
+                <span className="menu-item-name">{formatMoney(order.total, order.currencySymbol)}</span>
                 <span><span className={`order-status-badge ${order.status.toLowerCase()}`}>{order.status}</span></span>
               </button>
             ))}
@@ -134,7 +129,16 @@ export function OrdersPage() {
                 <span className="overline">Order #{selected.orderNumber}</span>
                 <h2>{selected.serviceMode}</h2>
               </div>
-              <button className="icon-button" onClick={() => setSelected(null)}><Icon name="close" /></button>
+              <div className="sheet-header-actions">
+                <button
+                  type="button"
+                  className="pill-btn pill-btn-outline sm"
+                  onClick={() => window.open(`/print/orders/${selected.id}`, '_blank')}
+                >
+                  <Icon name="receipt" size={13} /> Print
+                </button>
+                <button className="icon-button" onClick={() => setSelected(null)}><Icon name="close" /></button>
+              </div>
             </div>
 
             <p className="muted order-detail-time">{timeFormat.format(new Date(selected.createdAt))}</p>
@@ -143,15 +147,24 @@ export function OrdersPage() {
               {selected.lines.map((line, index) => (
                 <div className="order-detail-line" key={index}>
                   <span>{line.quantity}× {line.name}</span>
-                  <span>{currency.format(line.lineTotal)}</span>
+                  <span>{formatMoney(line.lineTotal, selected.currencySymbol)}</span>
                 </div>
               ))}
             </div>
 
             <div className="order-summary order-detail-summary">
-              <div><span>Subtotal</span><strong>{currency.format(selected.subtotal)}</strong></div>
-              <div><span>Tax</span><strong>{currency.format(selected.tax)}</strong></div>
-              <div className="order-total"><span>Total</span><strong>{currency.format(selected.total)}</strong></div>
+              <div><span>Subtotal</span><strong>{formatMoney(selected.subtotal, selected.currencySymbol)}</strong></div>
+              {selected.serviceCharge > 0 && (
+                <div><span>Service charge</span><strong>{formatMoney(selected.serviceCharge, selected.currencySymbol)}</strong></div>
+              )}
+              <div><span>Tax</span><strong>{formatMoney(selected.tax, selected.currencySymbol)}</strong></div>
+              <div className="order-total"><span>Total</span><strong>{formatMoney(selected.total, selected.currencySymbol)}</strong></div>
+              {selected.status === 'Completed' && (
+                <>
+                  <div><span>Amount tendered</span><strong>{formatMoney(selected.amountTendered, selected.currencySymbol)}</strong></div>
+                  <div><span>Change given</span><strong>{formatMoney(selected.changeDue, selected.currencySymbol)}</strong></div>
+                </>
+              )}
             </div>
 
             <label className="order-detail-status-label">

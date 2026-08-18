@@ -6,6 +6,7 @@ import { Icon, type IconName } from './Icon'
 const nav: { label: string; path: string; icon: IconName }[] = [
   { label: 'Overview', path: '/', icon: 'home' },
   { label: 'POS', path: '/pos', icon: 'pos' },
+  { label: 'Tables', path: '/tables', icon: 'grid' },
   { label: 'Orders', path: '/orders', icon: 'orders' },
   { label: 'Menu', path: '/menu', icon: 'menu' },
   { label: 'Inventory', path: '/inventory', icon: 'inventory' },
@@ -52,15 +53,18 @@ export function AppShell() {
         </div>
 
         <div className="rail-bottom">
-          <button
-            type="button"
-            className="rail-item"
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => `rail-item ${isActive ? 'active-accent' : ''}`}
             title="Settings & System Preferences"
-            onClick={() => alert('Settings & Preferences')}
           >
-            <Icon name="settings" size={22} />
-            <span className="rail-tooltip">Settings</span>
-          </button>
+            {({ isActive }) => (
+              <>
+                <Icon name="settings" size={22} filled={isActive} />
+                <span className="rail-tooltip">Settings</span>
+              </>
+            )}
+          </NavLink>
           <button
             type="button"
             className="rail-item"

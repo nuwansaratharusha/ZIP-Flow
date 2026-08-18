@@ -1,13 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Icon } from '../../components/Icon'
+import { formatMoney } from '../../lib/currency'
+import { useAuth } from '../auth/AuthContext'
 import { adjustStock, archiveItem, createItem, getAdjustments, getItems, updateItem } from './api'
 import type { StockAdjustment, StockItem } from './types'
-
-const currency = new Intl.NumberFormat('en-LK', {
-  style: 'currency',
-  currency: 'LKR',
-  minimumFractionDigits: 0,
-})
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', month: 'short', day: '2-digit' })
 
@@ -23,6 +19,8 @@ type EditDraft = {
 }
 
 export function InventoryPage() {
+  const { session } = useAuth()
+  const currencySymbol = session?.tenant.currencySymbol ?? '£'
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -192,7 +190,7 @@ export function InventoryPage() {
       {items.length > 0 && (
         <div className="inventory-valuation-stat">
           <span>Total inventory value</span>
-          <strong>{currency.format(items.reduce((sum, item) => sum + item.quantity * item.cost, 0))}</strong>
+          <strong>{formatMoney(items.reduce((sum, item) => sum + item.quantity * item.cost, 0), currencySymbol)}</strong>
         </div>
       )}
 
@@ -239,7 +237,7 @@ export function InventoryPage() {
                     <span>{item.quantity} {stockBadge(item)}</span>
                     <span className="muted">{item.parLevel}</span>
                     <span className="muted">{item.reorderLevel}</span>
-                    <span className="muted">{currency.format(item.cost)}</span>
+                    <span className="muted">{formatMoney(item.cost, currencySymbol)}</span>
                     <span className="inventory-row-actions">
                       <button className="menu-price-edit" onClick={() => startEdit(item)}>Edit</button>
                       <button className="menu-price-edit" onClick={() => openAdjust(item)}>Adjust</button>

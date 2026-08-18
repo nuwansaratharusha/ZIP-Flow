@@ -15,7 +15,7 @@ public sealed record LoginResponse(
     IReadOnlyCollection<string> Roles);
 
 public sealed record UserSummary(Guid Id, string Email, string DisplayName);
-public sealed record TenantSummary(Guid Id, string Code, string Name, string CurrencyCode);
+public sealed record TenantSummary(Guid Id, string Code, string Name, string CurrencyCode, string CurrencySymbol);
 public sealed record LocationSummary(Guid Id, string Code, string Name, string TimeZoneId);
 
 public interface IAuthService
@@ -60,7 +60,7 @@ public sealed class AuthService(
             token,
             DateTimeOffset.UtcNow.AddMinutes(tokenMinutes),
             new UserSummary(user.Id, user.Email, user.DisplayName),
-            new TenantSummary(user.Tenant.Id, user.Tenant.Code, user.Tenant.Name, user.Tenant.CurrencyCode),
+            new TenantSummary(user.Tenant.Id, user.Tenant.Code, user.Tenant.Name, user.Tenant.CurrencyCode, user.Tenant.CurrencySymbol),
             user.DefaultLocation is null
                 ? null
                 : new LocationSummary(user.DefaultLocation.Id, user.DefaultLocation.Code, user.DefaultLocation.Name, user.DefaultLocation.TimeZoneId),

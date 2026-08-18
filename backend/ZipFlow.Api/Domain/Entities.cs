@@ -11,9 +11,27 @@ public sealed class Tenant : EntityBase
 {
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
-    public string CurrencyCode { get; set; } = "USD";
+    public string CurrencyCode { get; set; } = "GBP";
+    public string CurrencySymbol { get; set; } = "£";
     public bool IsActive { get; set; } = true;
+    public string? ReceiptBusinessName { get; set; }
+    public string ReceiptFooterMessage { get; set; } = "Thank you for your visit!";
+    public bool ReceiptShowTaxId { get; set; }
+    public string? ReceiptTaxId { get; set; }
+    public bool ReceiptShowCollectionCode { get; set; } = true;
+    public decimal VatRate { get; set; } = 0.10m;
+    public decimal ServiceChargeRate { get; set; }
     public ICollection<Location> Locations { get; set; } = new List<Location>();
+}
+
+public sealed class CurrencyRate : EntityBase
+{
+    public Guid TenantId { get; set; }
+    public Tenant Tenant { get; set; } = null!;
+    public string Code { get; set; } = string.Empty;
+    public string Symbol { get; set; } = string.Empty;
+    public decimal Rate { get; set; } = 1m;
+    public bool IsArchived { get; set; }
 }
 
 public sealed class Location : EntityBase
@@ -124,8 +142,14 @@ public sealed class Order : EntityBase
     public string Status { get; set; } = string.Empty;
     public string? PaymentMethod { get; set; }
     public decimal Subtotal { get; set; }
+    public decimal ServiceCharge { get; set; }
     public decimal Tax { get; set; }
     public decimal Total { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public string CurrencySymbol { get; set; } = string.Empty;
+    public decimal ExchangeRate { get; set; } = 1m;
+    public decimal AmountTendered { get; set; }
+    public decimal ChangeDue { get; set; }
     public ICollection<OrderLine> Lines { get; set; } = new List<OrderLine>();
 }
 
@@ -187,4 +211,15 @@ public sealed class RecipeIngredient : EntityBase
     public StockItem StockItem { get; set; } = null!;
     public decimal Quantity { get; set; }
     public string Unit { get; set; } = string.Empty;
+}
+
+public sealed class RestaurantTable : EntityBase
+{
+    public Guid TenantId { get; set; }
+    public Tenant Tenant { get; set; } = null!;
+    public string Name { get; set; } = string.Empty;
+    public string Section { get; set; } = string.Empty;
+    public int Capacity { get; set; }
+    public string Status { get; set; } = "available";
+    public bool IsArchived { get; set; }
 }

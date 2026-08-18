@@ -4,9 +4,9 @@ using ZipFlow.Api.Services;
 
 namespace ZipFlow.Api.Endpoints;
 
-public sealed record SendToKitchenRequest(string ServiceMode, IReadOnlyList<OrderLineRequest> Lines);
-public sealed record CompletePaymentRequest(string ServiceMode, string PaymentMethod, IReadOnlyList<OrderLineRequest> Lines);
-public sealed record CompleteOrderRequest(string PaymentMethod);
+public sealed record SendToKitchenRequest(string ServiceMode, string? CurrencyCode, IReadOnlyList<OrderLineRequest> Lines);
+public sealed record CompletePaymentRequest(string ServiceMode, string PaymentMethod, string? CurrencyCode, decimal? AmountTendered, IReadOnlyList<OrderLineRequest> Lines);
+public sealed record CompleteOrderRequest(string PaymentMethod, decimal? AmountTendered);
 public sealed record SetOrderStatusRequest(string Status);
 
 public static class OrderEndpoints
@@ -27,11 +27,12 @@ public static class OrderEndpoints
             if (request.Lines is null || request.Lines.Count == 0 || request.Lines.Any(x => x.Quantity < 1))
                 return Results.BadRequest(ApiResponse<object>.Fail("Order must contain at least one line with quantity 1 or more."));
 
-            var (result, order) = await orders.CreateSentOrderAsync(current.TenantId, current.DefaultLocationId, request.ServiceMode, request.Lines, ct);
+            var (result, order) = await orders.CreateSentOrderAsync(current.TenantId, current.DefaultLocationId, request.ServiceMode, request.CurrencyCode, request.Lines, ct);
             return result switch
             {
                 CreateOrderResult.Created => Results.Ok(ApiResponse<OrderDto>.Ok(order!)),
                 CreateOrderResult.ItemNotFound => Results.BadRequest(ApiResponse<object>.Fail("One or more menu items could not be found.")),
+                CreateOrderResult.UnsupportedCurrency => Results.BadRequest(ApiResponse<object>.Fail("Unsupported currency.")),
                 _ => Results.BadRequest(ApiResponse<object>.Fail("Unable to send order to kitchen."))
             };
         })
@@ -46,11 +47,13 @@ public static class OrderEndpoints
             if (request.Lines is null || request.Lines.Count == 0 || request.Lines.Any(x => x.Quantity < 1))
                 return Results.BadRequest(ApiResponse<object>.Fail("Order must contain at least one line with quantity 1 or more."));
 
-            var (result, order) = await orders.CreateCompletedOrderAsync(current.TenantId, current.DefaultLocationId, request.ServiceMode, request.PaymentMethod, request.Lines, ct);
+            var (result, order) = await orders.CreateCompletedOrderAsync(current.TenantId, current.DefaultLocationId, request.ServiceMode, request.PaymentMethod, request.CurrencyCode, request.AmountTendered, request.Lines, ct);
             return result switch
             {
                 CreateOrderResult.Created => Results.Ok(ApiResponse<OrderDto>.Ok(order!)),
                 CreateOrderResult.ItemNotFound => Results.BadRequest(ApiResponse<object>.Fail("One or more menu items could not be found.")),
+                CreateOrderResult.UnsupportedCurrency => Results.BadRequest(ApiResponse<object>.Fail("Unsupported currency.")),
+                CreateOrderResult.InsufficientTender => Results.BadRequest(ApiResponse<object>.Fail("Amount tendered must be at least the order total.")),
                 _ => Results.BadRequest(ApiResponse<object>.Fail("Unable to complete payment."))
             };
         })
@@ -61,12 +64,13 @@ public static class OrderEndpoints
             if (!ValidPaymentMethods.Contains(request.PaymentMethod))
                 return Results.BadRequest(ApiResponse<object>.Fail("Invalid payment method."));
 
-            var (result, order) = await orders.CompleteExistingOrderAsync(current.TenantId, id, request.PaymentMethod, ct);
+            var (result, order) = await orders.CompleteExistingOrderAsync(current.TenantId, id, request.PaymentMethod, request.AmountTendered, ct);
             return result switch
             {
                 CompleteOrderResult.Completed => Results.Ok(ApiResponse<OrderDto>.Ok(order!)),
                 CompleteOrderResult.NotFound => Results.NotFound(ApiResponse<object>.Fail("Order not found.")),
                 CompleteOrderResult.NotAwaitingPayment => Results.Conflict(ApiResponse<object>.Fail("Order is not awaiting payment.")),
+                CompleteOrderResult.InsufficientTender => Results.BadRequest(ApiResponse<object>.Fail("Amount tendered must be at least the order total.")),
                 _ => Results.BadRequest(ApiResponse<object>.Fail("Unable to complete order."))
             };
         })

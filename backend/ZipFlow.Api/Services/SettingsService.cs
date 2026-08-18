@@ -1,0 +1,78 @@
+using Microsoft.EntityFrameworkCore;
+using ZipFlow.Api.Data;
+
+namespace ZipFlow.Api.Services;
+
+public sealed record ReceiptSettingsDto(
+    string BusinessName, string FooterMessage, bool ShowTaxId, string? TaxId, bool ShowCollectionCode);
+
+public sealed record TaxSettingsDto(decimal VatRatePercent, decimal ServiceChargeRatePercent);
+
+public interface ISettingsService
+{
+    Task<ReceiptSettingsDto?> GetReceiptSettingsAsync(Guid tenantId, CancellationToken ct);
+
+    Task<ReceiptSettingsDto?> UpdateReceiptSettingsAsync(
+        Guid tenantId, string? businessName, string footerMessage, bool showTaxId, string? taxId, bool showCollectionCode, CancellationToken ct);
+
+    Task<TaxSettingsDto?> GetTaxSettingsAsync(Guid tenantId, CancellationToken ct);
+
+    Task<(bool Success, string? Error, TaxSettingsDto? Result)> UpdateTaxSettingsAsync(
+        Guid tenantId, decimal vatRatePercent, decimal serviceChargeRatePercent, CancellationToken ct);
+}
+
+public sealed class SettingsService(AppDbContext db) : ISettingsService
+{
+    public async Task<ReceiptSettingsDto?> GetReceiptSettingsAsync(Guid tenantId, CancellationToken ct)
+    {
+        var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tenantId, ct);
+        return tenant is null ? null : ToDto(tenant.Name, tenant.ReceiptBusinessName, tenant.ReceiptFooterMessage, tenant.ReceiptShowTaxId, tenant.ReceiptTaxId, tenant.ReceiptShowCollectionCode);
+    }
+
+    public async Task<ReceiptSettingsDto?> UpdateReceiptSettingsAsync(
+        Guid tenantId, string? businessName, string footerMessage, bool showTaxId, string? taxId, bool showCollectionCode, CancellationToken ct)
+    {
+        var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Id == tenantId, ct);
+        if (tenant is null)
+            return null;
+
+        tenant.ReceiptBusinessName = string.IsNullOrWhiteSpace(businessName) ? null : businessName.Trim();
+        tenant.ReceiptFooterMessage = string.IsNullOrWhiteSpace(footerMessage) ? "Thank you for your visit!" : footerMessage.Trim();
+        tenant.ReceiptShowTaxId = showTaxId;
+        tenant.ReceiptTaxId = string.IsNullOrWhiteSpace(taxId) ? null : taxId.Trim();
+        tenant.ReceiptShowCollectionCode = showCollectionCode;
+        tenant.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        return ToDto(tenant.Name, tenant.ReceiptBusinessName, tenant.ReceiptFooterMessage, tenant.ReceiptShowTaxId, tenant.ReceiptTaxId, tenant.ReceiptShowCollectionCode);
+    }
+
+    private static ReceiptSettingsDto ToDto(string tenantName, string? businessName, string footerMessage, bool showTaxId, string? taxId, bool showCollectionCode) =>
+        new(string.IsNullOrWhiteSpace(businessName) ? tenantName : businessName, footerMessage, showTaxId, taxId, showCollectionCode);
+
+    public async Task<TaxSettingsDto?> GetTaxSettingsAsync(Guid tenantId, CancellationToken ct)
+    {
+        var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tenantId, ct);
+        return tenant is null ? null : new TaxSettingsDto(tenant.VatRate * 100, tenant.ServiceChargeRate * 100);
+    }
+
+    public async Task<(bool Success, string? Error, TaxSettingsDto? Result)> UpdateTaxSettingsAsync(
+        Guid tenantId, decimal vatRatePercent, decimal serviceChargeRatePercent, CancellationToken ct)
+    {
+        if (vatRatePercent < 0 || vatRatePercent > 100)
+            return (false, "VAT rate must be between 0 and 100.", null);
+        if (serviceChargeRatePercent < 0 || serviceChargeRatePercent > 100)
+            return (false, "Service charge rate must be between 0 and 100.", null);
+
+        var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Id == tenantId, ct);
+        if (tenant is null)
+            return (false, "Tenant not found.", null);
+
+        tenant.VatRate = vatRatePercent / 100;
+        tenant.ServiceChargeRate = serviceChargeRatePercent / 100;
+        tenant.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        return (true, null, new TaxSettingsDto(tenant.VatRate * 100, tenant.ServiceChargeRate * 100));
+    }
+}

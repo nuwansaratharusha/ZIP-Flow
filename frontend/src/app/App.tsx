@@ -9,6 +9,9 @@ import { KitchenPage } from '../features/kitchen/KitchenPage'
 import { MenuPage } from '../features/menu/MenuPage'
 import { OrdersPage } from '../features/orders/OrdersPage'
 import { PosPage } from '../features/pos/PosPage'
+import { ReceiptPrintPage } from '../features/receipt/ReceiptPrintPage'
+import { SettingsPage } from '../features/settings/SettingsPage'
+import { TablesPage } from '../features/tables/TablesPage'
 import { Icon } from '../components/Icon'
 
 function ComingSoon({ title, description }: { title: string; description: string }) {
@@ -35,12 +38,17 @@ export function App() {
             <Route element={<AppShell />}>
               <Route index element={<DashboardPage />} />
               <Route path="pos" element={<PosPage />} />
+              <Route path="tables" element={<TablesPage />} />
               <Route path="orders" element={<OrdersPage />} />
               <Route path="menu" element={<MenuPage />} />
               <Route path="inventory" element={<InventoryPage />} />
               <Route path="kitchen" element={<KitchenPage />} />
               <Route path="reports" element={<ComingSoon title="Reports" description="Sales, margin, food cost, inventory variance and multi-location reporting will be added on top of trusted transaction data." />} />
+              <Route path="settings" element={<SettingsPage />} />
             </Route>
+          </Route>
+          <Route element={<ProtectedRoute />}>
+            <Route path="print/orders/:orderId" element={<ReceiptPrintPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

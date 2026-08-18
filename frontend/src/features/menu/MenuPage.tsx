@@ -1,19 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../components/Icon'
+import { formatMoney } from '../../lib/currency'
+import { useAuth } from '../auth/AuthContext'
 import { getItems as getStockItems } from '../inventory/api'
 import type { StockItem } from '../inventory/types'
 import { archiveItem, createCategory, createItem, getCategories, getItems, getRecipe, saveRecipe, setAvailability, updateItem } from './api'
 import { STATIONS, type Category, type MenuItem, type Recipe } from './types'
 
-const currency = new Intl.NumberFormat('en-LK', {
-  style: 'currency',
-  currency: 'LKR',
-  minimumFractionDigits: 0,
-})
-
 type RecipeLineDraft = { stockItemId: string; quantity: string; unit: string }
 
 export function MenuPage() {
+  const { session } = useAuth()
+  const currencySymbol = session?.tenant.currencySymbol ?? '£'
   const [categories, setCategories] = useState<Category[]>([])
   const [items, setItems] = useState<MenuItem[]>([])
   const [stockItems, setStockItems] = useState<StockItem[]>([])
@@ -268,7 +266,7 @@ export function MenuPage() {
                       />
                     ) : (
                       <button className="menu-price-edit" onClick={() => startEditPrice(item)}>
-                        {currency.format(item.price)}
+                        {formatMoney(item.price, currencySymbol)}
                       </button>
                     )}
                   </span>
@@ -385,8 +383,8 @@ export function MenuPage() {
               </div>
 
               <div className="recipe-cost-preview">
-                <div><span>Total cost</span><strong>{currency.format(livePreview.totalCost)}</strong></div>
-                <div><span>Cost per serving</span><strong>{currency.format(livePreview.costPerServing)}</strong></div>
+                <div><span>Total cost</span><strong>{formatMoney(livePreview.totalCost, currencySymbol)}</strong></div>
+                <div><span>Cost per serving</span><strong>{formatMoney(livePreview.costPerServing, currencySymbol)}</strong></div>
                 <div><span>Food cost %</span><strong>{livePreview.foodCostPercentage ?? '—'}{livePreview.foodCostPercentage !== null ? '%' : ''}</strong></div>
               </div>
 

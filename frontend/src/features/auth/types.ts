@@ -9,6 +9,7 @@ export type TenantSummary = {
   code: string
   name: string
   currencyCode: string
+  currencySymbol: string
 }
 
 export type LocationSummary = {

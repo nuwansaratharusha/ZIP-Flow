@@ -1,24 +1,30 @@
 import { apiRequest, type ApiEnvelope } from '../../lib/api'
 import type { Order, OrderLineRequest, OrderStatus } from './types'
 
-export function sendToKitchen(serviceMode: string, lines: OrderLineRequest[]) {
+export function sendToKitchen(serviceMode: string, lines: OrderLineRequest[], currencyCode?: string) {
   return apiRequest<ApiEnvelope<Order>>('/api/orders/send-to-kitchen', {
     method: 'POST',
-    body: JSON.stringify({ serviceMode, lines }),
+    body: JSON.stringify({ serviceMode, currencyCode, lines }),
   }).then((res) => res.data)
 }
 
-export function completeOrder(orderId: string, paymentMethod: string) {
+export function completeOrder(orderId: string, paymentMethod: string, amountTendered?: number) {
   return apiRequest<ApiEnvelope<Order>>(`/api/orders/${orderId}/complete`, {
     method: 'POST',
-    body: JSON.stringify({ paymentMethod }),
+    body: JSON.stringify({ paymentMethod, amountTendered }),
   }).then((res) => res.data)
 }
 
-export function createCompletedOrder(serviceMode: string, paymentMethod: string, lines: OrderLineRequest[]) {
+export function createCompletedOrder(
+  serviceMode: string,
+  paymentMethod: string,
+  lines: OrderLineRequest[],
+  currencyCode?: string,
+  amountTendered?: number
+) {
   return apiRequest<ApiEnvelope<Order>>('/api/orders/complete-payment', {
     method: 'POST',
-    body: JSON.stringify({ serviceMode, paymentMethod, lines }),
+    body: JSON.stringify({ serviceMode, paymentMethod, currencyCode, amountTendered, lines }),
   }).then((res) => res.data)
 }
 

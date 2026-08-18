@@ -17,8 +17,13 @@ export type Order = {
   status: OrderStatus
   paymentMethod: string | null
   subtotal: number
+  serviceCharge: number
   tax: number
   total: number
+  currencyCode: string
+  currencySymbol: string
+  amountTendered: number
+  changeDue: number
   createdAt: string
   lines: OrderLine[]
 }

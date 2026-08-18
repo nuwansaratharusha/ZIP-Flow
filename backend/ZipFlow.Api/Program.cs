@@ -30,6 +30,9 @@ builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IRecipeService, RecipeService>();
 builder.Services.AddScoped<IKitchenService, KitchenService>();
+builder.Services.AddScoped<ITableService, TableService>();
+builder.Services.AddScoped<ISettingsService, SettingsService>();
+builder.Services.AddScoped<ICurrencyService, CurrencyService>();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddScoped<FoundationSeeder>();
 
@@ -111,6 +114,8 @@ app.MapOrderEndpoints();
 app.MapInventoryEndpoints();
 app.MapRecipeEndpoints();
 app.MapKitchenEndpoints();
+app.MapTableEndpoints();
+app.MapSettingsEndpoints();
 
 using (var scope = app.Services.CreateScope())
 {

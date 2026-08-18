@@ -13,8 +13,13 @@ public sealed record OrderDto(
     string Status,
     string? PaymentMethod,
     decimal Subtotal,
+    decimal ServiceCharge,
     decimal Tax,
     decimal Total,
+    string CurrencyCode,
+    string CurrencySymbol,
+    decimal AmountTendered,
+    decimal ChangeDue,
     DateTimeOffset CreatedAt,
     IReadOnlyList<OrderLineDto> Lines);
 
@@ -22,14 +27,17 @@ public enum CreateOrderResult
 {
     Created,
     EmptyOrder,
-    ItemNotFound
+    ItemNotFound,
+    UnsupportedCurrency,
+    InsufficientTender
 }
 
 public enum CompleteOrderResult
 {
     Completed,
     NotFound,
-    NotAwaitingPayment
+    NotAwaitingPayment,
+    InsufficientTender
 }
 
 public enum SetStatusResult
@@ -41,13 +49,13 @@ public enum SetStatusResult
 public interface IOrderService
 {
     Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
+        Guid tenantId, Guid? locationId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
 
     Task<(CreateOrderResult Result, OrderDto? Order)> CreateCompletedOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
+        Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
 
     Task<(CompleteOrderResult Result, OrderDto? Order)> CompleteExistingOrderAsync(
-        Guid tenantId, Guid orderId, string paymentMethod, CancellationToken ct);
+        Guid tenantId, Guid orderId, string paymentMethod, decimal? amountTendered, CancellationToken ct);
 
     Task<(SetStatusResult Result, OrderDto? Order)> SetStatusAsync(
         Guid tenantId, Guid orderId, string status, CancellationToken ct);
@@ -60,16 +68,16 @@ public interface IOrderService
 public sealed class OrderService(AppDbContext db) : IOrderService
 {
     public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
-        => await CreateOrderAsync(tenantId, locationId, serviceMode, "Sent", null, lines, ct);
+        Guid tenantId, Guid? locationId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
+        => await CreateOrderAsync(tenantId, locationId, serviceMode, "Sent", null, currencyCode, null, lines, ct);
 
     public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateCompletedOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
-        => await CreateOrderAsync(tenantId, locationId, serviceMode, "Completed", paymentMethod, lines, ct);
+        Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
+        => await CreateOrderAsync(tenantId, locationId, serviceMode, "Completed", paymentMethod, currencyCode, amountTendered, lines, ct);
 
     private async Task<(CreateOrderResult Result, OrderDto? Order)> CreateOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string status, string? paymentMethod,
-        IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
+        Guid tenantId, Guid? locationId, string serviceMode, string status, string? paymentMethod, string? currencyCode,
+        decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
     {
         if (lines.Count == 0)
             return (CreateOrderResult.EmptyOrder, null);
@@ -83,6 +91,24 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         if (menuItems.Count != itemIds.Length)
             return (CreateOrderResult.ItemNotFound, null);
 
+        var tenant = await db.Tenants.AsNoTracking().SingleAsync(x => x.Id == tenantId, ct);
+
+        string currCode = tenant.CurrencyCode;
+        string currSymbol = tenant.CurrencySymbol;
+        decimal rate = 1m;
+
+        if (!string.IsNullOrWhiteSpace(currencyCode) && !string.Equals(currencyCode, tenant.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+        {
+            var currencyRate = await db.CurrencyRates.AsNoTracking().SingleOrDefaultAsync(
+                x => x.TenantId == tenantId && x.Code == currencyCode.Trim().ToUpperInvariant() && !x.IsArchived, ct);
+            if (currencyRate is null)
+                return (CreateOrderResult.UnsupportedCurrency, null);
+
+            currCode = currencyRate.Code;
+            currSymbol = currencyRate.Symbol;
+            rate = currencyRate.Rate;
+        }
+
         var nextOrderNumber = (await db.Orders
             .Where(x => x.TenantId == tenantId)
             .Select(x => (int?)x.OrderNumber)
@@ -95,20 +121,24 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             OrderNumber = nextOrderNumber,
             ServiceMode = serviceMode,
             Status = status,
-            PaymentMethod = paymentMethod
+            PaymentMethod = paymentMethod,
+            CurrencyCode = currCode,
+            CurrencySymbol = currSymbol,
+            ExchangeRate = rate
         };
 
         decimal subtotal = 0;
         foreach (var line in lines)
         {
             var item = menuItems[line.MenuItemId];
-            var lineTotal = item.Price * line.Quantity;
+            var price = Math.Round(item.Price * rate, 2, MidpointRounding.AwayFromZero);
+            var lineTotal = price * line.Quantity;
             subtotal += lineTotal;
             order.Lines.Add(new OrderLine
             {
                 MenuItemId = item.Id,
                 Name = item.Name,
-                Price = item.Price,
+                Price = price,
                 Quantity = line.Quantity,
                 LineTotal = lineTotal,
                 Notes = string.IsNullOrWhiteSpace(line.Notes) ? null : line.Notes.Trim()
@@ -116,8 +146,19 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         }
 
         order.Subtotal = subtotal;
-        order.Tax = Math.Round(subtotal * 0.1m, 2, MidpointRounding.AwayFromZero);
-        order.Total = order.Subtotal + order.Tax;
+        order.ServiceCharge = Math.Round(subtotal * tenant.ServiceChargeRate, 2, MidpointRounding.AwayFromZero);
+        order.Tax = Math.Round((subtotal + order.ServiceCharge) * tenant.VatRate, 2, MidpointRounding.AwayFromZero);
+        order.Total = order.Subtotal + order.ServiceCharge + order.Tax;
+
+        if (status == "Completed")
+        {
+            var tendered = amountTendered ?? order.Total;
+            if (tendered < order.Total)
+                return (CreateOrderResult.InsufficientTender, null);
+
+            order.AmountTendered = tendered;
+            order.ChangeDue = tendered - order.Total;
+        }
 
         db.Orders.Add(order);
         await ConsumeIngredientsAsync(order, ct);
@@ -231,7 +272,7 @@ public sealed class OrderService(AppDbContext db) : IOrderService
     }
 
     public async Task<(CompleteOrderResult Result, OrderDto? Order)> CompleteExistingOrderAsync(
-        Guid tenantId, Guid orderId, string paymentMethod, CancellationToken ct)
+        Guid tenantId, Guid orderId, string paymentMethod, decimal? amountTendered, CancellationToken ct)
     {
         var order = await db.Orders
             .Include(x => x.Lines)
@@ -243,8 +284,14 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         if (order.Status != "Sent")
             return (CompleteOrderResult.NotAwaitingPayment, null);
 
+        var tendered = amountTendered ?? order.Total;
+        if (tendered < order.Total)
+            return (CompleteOrderResult.InsufficientTender, null);
+
         order.Status = "Completed";
         order.PaymentMethod = paymentMethod;
+        order.AmountTendered = tendered;
+        order.ChangeDue = tendered - order.Total;
         order.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
@@ -315,8 +362,13 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.Status,
         order.PaymentMethod,
         order.Subtotal,
+        order.ServiceCharge,
         order.Tax,
         order.Total,
+        order.CurrencyCode,
+        order.CurrencySymbol,
+        order.AmountTendered,
+        order.ChangeDue,
         order.CreatedAt,
         order.Lines.Select(x => new OrderLineDto(x.Name, x.Quantity, x.Price, x.LineTotal, x.Notes)).ToArray());
 }

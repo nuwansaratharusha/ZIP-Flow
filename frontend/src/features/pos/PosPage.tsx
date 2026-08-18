@@ -1,43 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../components/Icon'
+import { formatMoney } from '../../lib/currency'
 import { getCatalog } from '../menu/api'
 import type { Category, MenuItem } from '../menu/types'
 import { completeOrder, createCompletedOrder, sendToKitchen } from '../orders/api'
+import { getCurrencies, getTaxSettings } from '../settings/api'
+import { archiveTable, createTable, getTables, updateTable } from '../tables/api'
+import { TABLE_SECTIONS, type RestaurantTable } from '../tables/types'
 
 type OrderLine = MenuItem & { quantity: number; notes?: string }
-
-export type RestaurantTable = {
-  id: string
-  name: string
-  section: string
-  capacity: number
-  status: 'available' | 'occupied' | 'reserved'
-}
-
-const defaultTables: RestaurantTable[] = [
-  { id: 't1', name: 'Table 01', section: 'Main Dining', capacity: 2, status: 'available' },
-  { id: 't2', name: 'Table 02', section: 'Main Dining', capacity: 2, status: 'available' },
-  { id: 't3', name: 'Table 03', section: 'Main Dining', capacity: 4, status: 'available' },
-  { id: 't4', name: 'Table 04', section: 'Main Dining', capacity: 4, status: 'available' },
-  { id: 't5', name: 'Table 05', section: 'Main Dining', capacity: 6, status: 'available' },
-  { id: 't12', name: 'Table 12', section: 'Main Dining', capacity: 4, status: 'occupied' },
-  { id: 't14', name: 'Table 14', section: 'Main Dining', capacity: 8, status: 'reserved' },
-  { id: 'p1', name: 'Patio 01', section: 'Patio', capacity: 4, status: 'available' },
-  { id: 'p2', name: 'Patio 02', section: 'Patio', capacity: 4, status: 'available' },
-  { id: 'p3', name: 'Patio 03', section: 'Patio', capacity: 6, status: 'occupied' },
-  { id: 'b1', name: 'Bar 01', section: 'Bar & Lounge', capacity: 1, status: 'available' },
-  { id: 'b2', name: 'Bar 02', section: 'Bar & Lounge', capacity: 1, status: 'available' },
-  { id: 'b3', name: 'Bar 03', section: 'Bar & Lounge', capacity: 1, status: 'occupied' },
-  { id: 'l1', name: 'Lounge A', section: 'Bar & Lounge', capacity: 6, status: 'available' },
-  { id: 'bt1', name: 'Booth 01', section: 'Private Booths', capacity: 4, status: 'available' },
-  { id: 'bt2', name: 'Booth 02', section: 'Private Booths', capacity: 4, status: 'reserved' },
-]
-
-const currency = new Intl.NumberFormat('en-LK', {
-  style: 'currency',
-  currency: 'LKR',
-  minimumFractionDigits: 0,
-})
+type ActiveCurrency = { code: string; symbol: string; rate: number }
 
 function monogram(name: string) {
   const words = name.trim().split(/\s+/)
@@ -58,20 +30,23 @@ export function PosPage() {
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [order, setOrder] = useState<OrderLine[]>([])
 
+  const [currencies, setCurrencies] = useState<ActiveCurrency[]>([])
+  const [activeCurrency, setActiveCurrency] = useState<ActiveCurrency>({ code: 'GBP', symbol: '£', rate: 1 })
+  const [vatRate, setVatRate] = useState(0)
+  const [serviceChargeRate, setServiceChargeRate] = useState(0)
+
   // Tables & Guests State
-  const [tables, setTables] = useState<RestaurantTable[]>(() => {
-    const saved = localStorage.getItem('zipflow_pos_tables')
-    return saved ? JSON.parse(saved) : defaultTables
-  })
-  const [selectedTable, setSelectedTable] = useState<RestaurantTable>(() => {
-    return defaultTables.find((t) => t.id === 't12') || defaultTables[0]
-  })
+  const [tables, setTables] = useState<RestaurantTable[]>([])
+  const [selectedTable, setSelectedTable] = useState<RestaurantTable | null>(null)
   const [tableModalOpen, setTableModalOpen] = useState(false)
   const [tableSectionFilter, setTableSectionFilter] = useState('all')
   const [newTableFormOpen, setNewTableFormOpen] = useState(false)
   const [newTableName, setNewTableName] = useState('')
-  const [newTableSection, setNewTableSection] = useState('Main Dining')
+  const [newTableSection, setNewTableSection] = useState<string>(TABLE_SECTIONS[0])
   const [newTableCapacity, setNewTableCapacity] = useState(4)
+  const [newTableError, setNewTableError] = useState('')
+  const [savingTable, setSavingTable] = useState(false)
+  const [editingTableId, setEditingTableId] = useState<string | null>(null)
 
   const [guestCount, setGuestCount] = useState(3)
   const [guestPickerOpen, setGuestPickerOpen] = useState(false)
@@ -79,14 +54,12 @@ export function PosPage() {
   const [currentOrderId, setCurrentOrderId] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [paying, setPaying] = useState(false)
+  const [tenderedInput, setTenderedInput] = useState('')
   const [actionError, setActionError] = useState('')
   const [confirmation, setConfirmation] = useState('')
+  const [lastPrintableOrderId, setLastPrintableOrderId] = useState<string | null>(null)
 
   const locked = currentOrderId !== null
-
-  useEffect(() => {
-    localStorage.setItem('zipflow_pos_tables', JSON.stringify(tables))
-  }, [tables])
 
   useEffect(() => {
     getCatalog()
@@ -96,6 +69,34 @@ export function PosPage() {
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load the menu.'))
       .finally(() => setLoading(false))
+
+    getTables()
+      .then((fetched) => {
+        setTables(fetched)
+        setSelectedTable((current) => current ?? fetched[0] ?? null)
+      })
+      .catch(() => {
+        // table picker is a convenience for Dine-in; a failed fetch shouldn't block the rest of POS
+      })
+
+    getCurrencies()
+      .then((settings) => {
+        const base: ActiveCurrency = { code: settings.baseCode, symbol: settings.baseSymbol, rate: 1 }
+        setCurrencies([base, ...settings.supported.map((c) => ({ code: c.code, symbol: c.symbol, rate: c.rate }))])
+        setActiveCurrency(base)
+      })
+      .catch(() => {
+        // the currency switcher is a convenience; a failed fetch just leaves POS on its built-in default
+      })
+
+    getTaxSettings()
+      .then((tax) => {
+        setVatRate(tax.vatRatePercent / 100)
+        setServiceChargeRate(tax.serviceChargeRatePercent / 100)
+      })
+      .catch(() => {
+        // the live preview just falls back to 0% until this loads; the backend always computes the real charge
+      })
   }, [])
 
   useEffect(() => {
@@ -123,9 +124,17 @@ export function PosPage() {
     return tables.filter((t) => t.section === tableSectionFilter)
   }, [tables, tableSectionFilter])
 
+  const round2 = (n: number) => Math.round(n * 100) / 100
+
   const subtotal = order.reduce((sum, line) => sum + line.price * line.quantity, 0)
-  const tax = Math.round(subtotal * 0.1)
-  const total = subtotal + tax
+  const convertedSubtotal = round2(subtotal * activeCurrency.rate)
+  const serviceCharge = round2(convertedSubtotal * serviceChargeRate)
+  const tax = round2((convertedSubtotal + serviceCharge) * vatRate)
+  const total = convertedSubtotal + serviceCharge + tax
+  const amountDue = total
+  const tenderedValue = Number(tenderedInput) || 0
+  const changeDue = Math.max(0, tenderedValue - amountDue)
+  const tenderTooLow = tenderedInput !== '' && tenderedValue < amountDue
 
   const addProduct = (product: MenuItem) => {
     if (locked) return
@@ -164,11 +173,13 @@ export function PosPage() {
 
   const handleSendToKitchen = async () => {
     setActionError('')
+    setLastPrintableOrderId(null)
     setSending(true)
     try {
       const created = await sendToKitchen(
         serviceMode,
-        order.map((line) => ({ menuItemId: line.id, quantity: line.quantity, notes: line.notes }))
+        order.map((line) => ({ menuItemId: line.id, quantity: line.quantity, notes: line.notes })),
+        activeCurrency.code
       )
       setCurrentOrderId(created.id)
       setConfirmation('Sent to kitchen.')
@@ -180,21 +191,28 @@ export function PosPage() {
   }
 
   const handlePay = async (method: 'Cash' | 'Card') => {
+    if (tenderTooLow) return
     setActionError('')
     setPaying(true)
     try {
-      if (currentOrderId) {
-        await completeOrder(currentOrderId, method)
-      } else {
-        await createCompletedOrder(
-          serviceMode,
-          method,
-          order.map((line) => ({ menuItemId: line.id, quantity: line.quantity, notes: line.notes }))
-        )
-      }
+      const completed = currentOrderId
+        ? await completeOrder(currentOrderId, method, tenderedValue || amountDue)
+        : await createCompletedOrder(
+            serviceMode,
+            method,
+            order.map((line) => ({ menuItemId: line.id, quantity: line.quantity, notes: line.notes })),
+            activeCurrency.code,
+            tenderedValue || amountDue
+          )
       setPaymentOpen(false)
       resetOrder()
-      setConfirmation(`Payment completed (${method}).`)
+      setTenderedInput('')
+      setLastPrintableOrderId(completed.id)
+      setConfirmation(
+        completed.changeDue > 0
+          ? `Payment completed (${method}). Change due: ${formatMoney(completed.changeDue, completed.currencySymbol)}.`
+          : `Payment completed (${method}).`
+      )
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to complete payment.')
     } finally {
@@ -202,24 +220,64 @@ export function PosPage() {
     }
   }
 
-  const handleAddTable = (e: React.FormEvent) => {
+  const handleAddTable = async (e: React.FormEvent) => {
     e.preventDefault()
+    setNewTableError('')
+    setLastPrintableOrderId(null)
     if (!newTableName.trim()) return
 
-    const newTbl: RestaurantTable = {
-      id: `tbl_${Date.now()}`,
-      name: newTableName.trim(),
-      section: newTableSection,
-      capacity: Number(newTableCapacity) || 4,
-      status: 'available',
+    setSavingTable(true)
+    try {
+      if (editingTableId) {
+        const updated = await updateTable(editingTableId, newTableName.trim(), newTableSection, Number(newTableCapacity) || 4)
+        setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+        setSelectedTable((prev) => (prev?.id === updated.id ? updated : prev))
+        setConfirmation(`Updated ${updated.name}`)
+      } else {
+        const created = await createTable(newTableName.trim(), newTableSection, Number(newTableCapacity) || 4)
+        setTables((prev) => [...prev, created])
+        setSelectedTable(created)
+        setConfirmation(`Created and selected ${created.name}`)
+      }
+      setEditingTableId(null)
+      setNewTableName('')
+      setNewTableFormOpen(false)
+      setTableModalOpen(false)
+    } catch (err) {
+      setNewTableError(err instanceof Error ? err.message : 'Failed to save table.')
+    } finally {
+      setSavingTable(false)
     }
+  }
 
-    setTables((prev) => [...prev, newTbl])
-    setSelectedTable(newTbl)
+  const startEditTable = (tbl: RestaurantTable, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingTableId(tbl.id)
+    setNewTableName(tbl.name)
+    setNewTableSection(tbl.section)
+    setNewTableCapacity(tbl.capacity)
+    setNewTableError('')
+    setNewTableFormOpen(true)
+  }
+
+  const cancelTableForm = () => {
+    setEditingTableId(null)
     setNewTableName('')
+    setNewTableError('')
     setNewTableFormOpen(false)
-    setTableModalOpen(false)
-    setConfirmation(`Created and selected ${newTbl.name}`)
+  }
+
+  const handleArchiveTable = async (tbl: RestaurantTable, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setLastPrintableOrderId(null)
+    try {
+      await archiveTable(tbl.id)
+      setTables((prev) => prev.filter((t) => t.id !== tbl.id))
+      setSelectedTable((prev) => (prev?.id === tbl.id ? null : prev))
+      setConfirmation(`Removed ${tbl.name}`)
+    } catch (err) {
+      setNewTableError(err instanceof Error ? err.message : 'Failed to remove table.')
+    }
   }
 
   return (
@@ -237,6 +295,24 @@ export function PosPage() {
               </button>
             ))}
           </div>
+
+          {currencies.length > 1 && (
+            <label className="currency-switcher" title="Currency for this sale">
+              <Icon name="cash" size={14} />
+              <select
+                value={activeCurrency.code}
+                disabled={locked}
+                onChange={(e) => {
+                  const next = currencies.find((c) => c.code === e.target.value)
+                  if (next) setActiveCurrency(next)
+                }}
+              >
+                {currencies.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <label className="pos-search">
             <Icon name="search" />
@@ -279,7 +355,7 @@ export function PosPage() {
                 <strong>{product.name}</strong>
                 <small>{product.sku}</small>
               </span>
-              <span className="product-price">{currency.format(product.price)}</span>
+              <span className="product-price">{formatMoney(product.price * activeCurrency.rate, activeCurrency.symbol)}</span>
               <span className="product-add">
                 <Icon name="plus" />
               </span>
@@ -299,7 +375,7 @@ export function PosPage() {
                 onClick={() => setTableModalOpen(true)}
                 title="Change Table"
               >
-                <h1>{selectedTable.name}</h1>
+                <h1>{selectedTable?.name ?? 'Select table'}</h1>
                 <span className="table-change-badge">Change</span>
               </button>
             ) : (
@@ -382,11 +458,24 @@ export function PosPage() {
         <div className="order-context">
           <span>Order #1048</span>
           <span>Alex Morgan</span>
-          {serviceMode === 'Dine in' && <span className="order-context-section">{selectedTable.section}</span>}
+          {serviceMode === 'Dine in' && selectedTable && <span className="order-context-section">{selectedTable.section}</span>}
         </div>
 
         <div className="order-lines">
-          {confirmation && <div className="alert success pos-confirmation">{confirmation}</div>}
+          {confirmation && (
+            <div className="alert success pos-confirmation">
+              <span>{confirmation}</span>
+              {lastPrintableOrderId && (
+                <button
+                  type="button"
+                  className="pos-print-receipt-btn"
+                  onClick={() => window.open(`/print/orders/${lastPrintableOrderId}`, '_blank')}
+                >
+                  <Icon name="receipt" size={13} /> Print receipt
+                </button>
+              )}
+            </div>
+          )}
           {actionError && <div className="alert error pos-confirmation">{actionError}</div>}
 
           {order.length === 0 && (
@@ -406,7 +495,7 @@ export function PosPage() {
                 <div>
                   <strong>{line.name}</strong>
                 </div>
-                <strong>{currency.format(line.price * line.quantity)}</strong>
+                <strong>{formatMoney(line.price * line.quantity * activeCurrency.rate, activeCurrency.symbol)}</strong>
               </div>
               <div className="line-actions">
                 <button
@@ -449,15 +538,21 @@ export function PosPage() {
         <div className="order-summary">
           <div>
             <span>Subtotal</span>
-            <strong>{currency.format(subtotal)}</strong>
+            <strong>{formatMoney(convertedSubtotal, activeCurrency.symbol)}</strong>
           </div>
+          {serviceCharge > 0 && (
+            <div>
+              <span>Service charge · {(serviceChargeRate * 100).toFixed(2).replace(/\.?0+$/, '')}%</span>
+              <strong>{formatMoney(serviceCharge, activeCurrency.symbol)}</strong>
+            </div>
+          )}
           <div>
-            <span>Tax · 10%</span>
-            <strong>{currency.format(tax)}</strong>
+            <span>VAT · {(vatRate * 100).toFixed(2).replace(/\.?0+$/, '')}%</span>
+            <strong>{formatMoney(tax, activeCurrency.symbol)}</strong>
           </div>
           <div className="order-total">
             <span>Total</span>
-            <strong>{currency.format(total)}</strong>
+            <strong>{formatMoney(total, activeCurrency.symbol)}</strong>
           </div>
         </div>
 
@@ -469,8 +564,15 @@ export function PosPage() {
           >
             {locked ? 'Sent to kitchen' : sending ? 'Sending…' : 'Send to kitchen'}
           </button>
-          <button className="pay-button" disabled={!order.length} onClick={() => setPaymentOpen(true)}>
-            Pay <span>{currency.format(total)}</span>
+          <button
+            className="pay-button"
+            disabled={!order.length}
+            onClick={() => {
+              setTenderedInput(amountDue.toFixed(2))
+              setPaymentOpen(true)
+            }}
+          >
+            Pay <span>{formatMoney(total, activeCurrency.symbol)}</span>
           </button>
         </div>
       </aside>
@@ -488,7 +590,7 @@ export function PosPage() {
                 <button
                   type="button"
                   className="pill-btn pill-btn-primary sm"
-                  onClick={() => setNewTableFormOpen((prev) => !prev)}
+                  onClick={() => (newTableFormOpen ? cancelTableForm() : setNewTableFormOpen(true))}
                 >
                   <Icon name="plus" size={13} />
                   <span>{newTableFormOpen ? 'Close Form' : 'Add Table'}</span>
@@ -499,9 +601,12 @@ export function PosPage() {
               </div>
             </div>
 
-            {/* Add Table Form Dropdown Drawer */}
+            {newTableError && !newTableFormOpen && <div className="alert error table-modal-error">{newTableError}</div>}
+
+            {/* Add/Edit Table Form Dropdown Drawer */}
             {newTableFormOpen && (
               <form onSubmit={handleAddTable} className="new-table-drawer">
+                <p className="new-table-drawer-title">{editingTableId ? 'Edit table' : 'New table'}</p>
                 <div className="new-table-form-row">
                   <div className="form-input-group">
                     <label>Table Name</label>
@@ -521,10 +626,7 @@ export function PosPage() {
                       value={newTableSection}
                       onChange={(e) => setNewTableSection(e.target.value)}
                     >
-                      <option value="Main Dining">Main Dining</option>
-                      <option value="Patio">Patio</option>
-                      <option value="Bar &amp; Lounge">Bar &amp; Lounge</option>
-                      <option value="Private Booths">Private Booths</option>
+                      {TABLE_SECTIONS.map((sec) => <option key={sec} value={sec}>{sec}</option>)}
                     </select>
                   </div>
 
@@ -539,10 +641,11 @@ export function PosPage() {
                     />
                   </div>
 
-                  <button type="submit" className="pill-btn pill-btn-primary sm" style={{ alignSelf: 'flex-end', height: '38px' }}>
-                    Create Table
+                  <button type="submit" className="pill-btn pill-btn-primary sm" disabled={savingTable} style={{ alignSelf: 'flex-end', height: '38px' }}>
+                    {savingTable ? 'Saving…' : editingTableId ? 'Save Changes' : 'Create Table'}
                   </button>
                 </div>
+                {newTableError && <div className="alert error">{newTableError}</div>}
               </form>
             )}
 
@@ -563,15 +666,22 @@ export function PosPage() {
             {/* Tables Grid */}
             <div className="tables-selection-grid">
               {visibleTables.map((tbl) => {
-                const isSelected = selectedTable.id === tbl.id
+                const isSelected = selectedTable?.id === tbl.id
                 return (
-                  <button
+                  <div
                     key={tbl.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     className={`pos-table-card ${isSelected ? 'selected' : ''} status-${tbl.status}`}
                     onClick={() => {
                       setSelectedTable(tbl)
                       setTableModalOpen(false)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        setSelectedTable(tbl)
+                        setTableModalOpen(false)
+                      }
                     }}
                   >
                     <div className="table-card-top">
@@ -592,12 +702,21 @@ export function PosPage() {
                       </span>
                     </div>
 
+                    <div className="table-card-actions">
+                      <button type="button" title="Edit table" onClick={(e) => startEditTable(tbl, e)}>
+                        <Icon name="edit" size={12} />
+                      </button>
+                      <button type="button" title="Remove table" onClick={(e) => handleArchiveTable(tbl, e)}>
+                        <Icon name="trash" size={12} />
+                      </button>
+                    </div>
+
                     {isSelected && (
                       <span className="table-selected-check">
                         <Icon name="check" size={12} />
                       </span>
                     )}
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -636,20 +755,41 @@ export function PosPage() {
 
             <div className="payment-amount">
               <span>Amount due</span>
-              <strong>{currency.format(total)}</strong>
+              <strong>{formatMoney(amountDue, activeCurrency.symbol)}</strong>
             </div>
+
+            <label className="settings-field payment-tendered-field">
+              Amount tendered
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={tenderedInput}
+                onChange={(e) => setTenderedInput(e.target.value)}
+              />
+            </label>
+
+            {tenderTooLow && (
+              <div className="alert error">Amount tendered is less than the amount due.</div>
+            )}
+            {!tenderTooLow && changeDue > 0 && (
+              <div className="payment-change-due">
+                <span>Change due</span>
+                <strong>{formatMoney(changeDue, activeCurrency.symbol)}</strong>
+              </div>
+            )}
 
             {actionError && <div className="alert error">{actionError}</div>}
 
             <div className="payment-methods">
-              <button disabled={paying} onClick={() => handlePay('Card')}>
+              <button disabled={paying || tenderTooLow} onClick={() => handlePay('Card')}>
                 <span className="payment-icon">
                   <Icon name="card" />
                 </span>
                 <strong>Card</strong>
                 <small>Terminal payment</small>
               </button>
-              <button disabled={paying} onClick={() => handlePay('Cash')}>
+              <button disabled={paying || tenderTooLow} onClick={() => handlePay('Cash')}>
                 <span className="payment-icon">
                   <Icon name="cash" />
                 </span>

@@ -21,6 +21,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
     public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
+    public DbSet<RestaurantTable> RestaurantTables => Set<RestaurantTable>();
+    public DbSet<CurrencyRate> CurrencyRates => Set<CurrencyRate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -31,7 +33,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Code).HasMaxLength(40).IsRequired();
             b.Property(x => x.Name).HasMaxLength(160).IsRequired();
             b.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
+            b.Property(x => x.CurrencySymbol).HasMaxLength(8).IsRequired();
+            b.Property(x => x.ReceiptBusinessName).HasMaxLength(160);
+            b.Property(x => x.ReceiptFooterMessage).HasMaxLength(200).IsRequired();
+            b.Property(x => x.ReceiptTaxId).HasMaxLength(60);
+            b.Property(x => x.VatRate).HasColumnType("decimal(9,6)");
+            b.Property(x => x.ServiceChargeRate).HasColumnType("decimal(9,6)");
             b.HasIndex(x => x.Code).IsUnique();
+        });
+
+        modelBuilder.Entity<CurrencyRate>(b =>
+        {
+            b.ToTable("CurrencyRate", "organization");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Code).HasMaxLength(12).IsRequired();
+            b.Property(x => x.Symbol).HasMaxLength(8).IsRequired();
+            b.Property(x => x.Rate).HasColumnType("decimal(18,6)");
+            b.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Location>(b =>
@@ -135,8 +154,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Status).HasMaxLength(20).IsRequired();
             b.Property(x => x.PaymentMethod).HasMaxLength(20);
             b.Property(x => x.Subtotal).HasColumnType("decimal(18,2)");
+            b.Property(x => x.ServiceCharge).HasColumnType("decimal(18,2)");
             b.Property(x => x.Tax).HasColumnType("decimal(18,2)");
             b.Property(x => x.Total).HasColumnType("decimal(18,2)");
+            b.Property(x => x.CurrencyCode).HasMaxLength(12).IsRequired();
+            b.Property(x => x.CurrencySymbol).HasMaxLength(8).IsRequired();
+            b.Property(x => x.ExchangeRate).HasColumnType("decimal(18,6)");
+            b.Property(x => x.AmountTendered).HasColumnType("decimal(18,2)");
+            b.Property(x => x.ChangeDue).HasColumnType("decimal(18,2)");
             b.HasIndex(x => new { x.TenantId, x.CreatedAt });
             b.HasIndex(x => new { x.TenantId, x.OrderNumber }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
@@ -153,6 +178,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Notes).HasMaxLength(300);
             b.HasOne(x => x.Order).WithMany(x => x.Lines).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.MenuItem).WithMany().HasForeignKey(x => x.MenuItemId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RestaurantTable>(b =>
+        {
+            b.ToTable("RestaurantTable", "pos");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Name).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Section).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Status).HasMaxLength(20).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<StockItem>(b =>

@@ -24,7 +24,7 @@ public static class FoundationEndpoints
                 .Select(x => new
                 {
                     user = new { x.Id, x.Email, x.DisplayName },
-                    tenant = new { x.Tenant.Id, x.Tenant.Code, x.Tenant.Name, x.Tenant.CurrencyCode },
+                    tenant = new { x.Tenant.Id, x.Tenant.Code, x.Tenant.Name, x.Tenant.CurrencyCode, x.Tenant.CurrencySymbol },
                     defaultLocation = x.DefaultLocation == null
                         ? null
                         : new { x.DefaultLocation.Id, x.DefaultLocation.Code, x.DefaultLocation.Name, x.DefaultLocation.TimeZoneId },

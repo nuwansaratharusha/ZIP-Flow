@@ -34,7 +34,15 @@ public sealed class FoundationSeeder(
         ("menu.recipes.view", "Menu", "View recipes"),
         ("menu.recipes.manage", "Menu", "Manage recipes"),
         ("kitchen.tickets.view", "Kitchen", "View kitchen tickets"),
-        ("kitchen.tickets.manage", "Kitchen", "Bump and recall kitchen tickets")
+        ("kitchen.tickets.manage", "Kitchen", "Bump and recall kitchen tickets"),
+        ("pos.tables.view", "POS", "View tables"),
+        ("pos.tables.manage", "POS", "Manage tables"),
+        ("settings.receipt.view", "Settings", "View receipt settings"),
+        ("settings.receipt.manage", "Settings", "Manage receipt settings"),
+        ("settings.currency.view", "Settings", "View currency settings"),
+        ("settings.currency.manage", "Settings", "Manage currency settings"),
+        ("settings.tax.view", "Settings", "View VAT and service charge settings"),
+        ("settings.tax.manage", "Settings", "Manage VAT and service charge settings")
     ];
 
     public async Task RunAsync(CancellationToken ct = default)
@@ -50,7 +58,8 @@ public sealed class FoundationSeeder(
             {
                 Code = tenantCode,
                 Name = configuration["BootstrapAdmin:TenantName"] ?? "Demo Restaurant Group",
-                CurrencyCode = configuration["BootstrapAdmin:CurrencyCode"] ?? "USD"
+                CurrencyCode = configuration["BootstrapAdmin:CurrencyCode"] ?? "GBP",
+                CurrencySymbol = configuration["BootstrapAdmin:CurrencySymbol"] ?? "£"
             };
             db.Tenants.Add(tenant);
         }

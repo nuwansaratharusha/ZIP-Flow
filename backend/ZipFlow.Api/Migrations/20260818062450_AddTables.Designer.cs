@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ZipFlow.Api.Data;
 
@@ -11,9 +12,11 @@ using ZipFlow.Api.Data;
 namespace ZipFlow.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260818062450_AddTables")]
+    partial class AddTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -158,45 +161,6 @@ namespace ZipFlow.Api.Migrations
                     b.ToTable("Category", "menu");
                 });
 
-            modelBuilder.Entity("ZipFlow.Api.Domain.CurrencyRate", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(12)
-                        .HasColumnType("nvarchar(12)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<bool>("IsArchived")
-                        .HasColumnType("bit");
-
-                    b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<string>("Symbol")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "Code")
-                        .IsUnique();
-
-                    b.ToTable("CurrencyRate", "organization");
-                });
-
             modelBuilder.Entity("ZipFlow.Api.Domain.Location", b =>
                 {
                     b.Property<Guid>("Id")
@@ -291,27 +255,8 @@ namespace ZipFlow.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<decimal>("AmountTendered")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("ChangeDue")
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("CurrencyCode")
-                        .IsRequired()
-                        .HasMaxLength(12)
-                        .HasColumnType("nvarchar(12)");
-
-                    b.Property<string>("CurrencySymbol")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
-
-                    b.Property<decimal>("ExchangeRate")
-                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
@@ -322,9 +267,6 @@ namespace ZipFlow.Api.Migrations
                     b.Property<string>("PaymentMethod")
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
-
-                    b.Property<decimal>("ServiceCharge")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("ServiceMode")
                         .IsRequired()
@@ -731,11 +673,6 @@ namespace ZipFlow.Api.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
-                    b.Property<string>("CurrencySymbol")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
-
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -744,33 +681,8 @@ namespace ZipFlow.Api.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("nvarchar(160)");
 
-                    b.Property<string>("ReceiptBusinessName")
-                        .HasMaxLength(160)
-                        .HasColumnType("nvarchar(160)");
-
-                    b.Property<string>("ReceiptFooterMessage")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<bool>("ReceiptShowCollectionCode")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("ReceiptShowTaxId")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("ReceiptTaxId")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<decimal>("ServiceChargeRate")
-                        .HasColumnType("decimal(9,6)");
-
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("datetimeoffset");
-
-                    b.Property<decimal>("VatRate")
-                        .HasColumnType("decimal(9,6)");
 
                     b.HasKey("Id");
 
@@ -817,17 +729,6 @@ namespace ZipFlow.Api.Migrations
                 });
 
             modelBuilder.Entity("ZipFlow.Api.Domain.Category", b =>
-                {
-                    b.HasOne("ZipFlow.Api.Domain.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ZipFlow.Api.Domain.CurrencyRate", b =>
                 {
                     b.HasOne("ZipFlow.Api.Domain.Tenant", "Tenant")
                         .WithMany()
