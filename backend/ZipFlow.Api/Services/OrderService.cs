@@ -4,8 +4,8 @@ using ZipFlow.Api.Domain;
 
 namespace ZipFlow.Api.Services;
 
-public sealed record OrderLineRequest(Guid MenuItemId, int Quantity);
-public sealed record OrderLineDto(string Name, int Quantity, decimal Price, decimal LineTotal);
+public sealed record OrderLineRequest(Guid MenuItemId, int Quantity, string? Notes = null);
+public sealed record OrderLineDto(string Name, int Quantity, decimal Price, decimal LineTotal, string? Notes);
 public sealed record OrderDto(
     Guid Id,
     int OrderNumber,
@@ -110,7 +110,8 @@ public sealed class OrderService(AppDbContext db) : IOrderService
                 Name = item.Name,
                 Price = item.Price,
                 Quantity = line.Quantity,
-                LineTotal = lineTotal
+                LineTotal = lineTotal,
+                Notes = string.IsNullOrWhiteSpace(line.Notes) ? null : line.Notes.Trim()
             });
         }
 
@@ -119,9 +120,114 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.Total = order.Subtotal + order.Tax;
 
         db.Orders.Add(order);
+        await ConsumeIngredientsAsync(order, ct);
         await db.SaveChangesAsync(ct);
 
         return (CreateOrderResult.Created, ToDto(order));
+    }
+
+    /// <summary>
+    /// Never blocks the sale and never rejects on a negative result — a negative theoretical
+    /// balance here is meaningful shrinkage/variance data, not an error. Manual counts
+    /// (InventoryService.AdjustStockAsync) keep the strict "no negative result" guard;
+    /// automatic sale-driven consumption is intentionally permissive.
+    /// </summary>
+    private async Task ConsumeIngredientsAsync(Order order, CancellationToken ct)
+    {
+        var menuItemIds = order.Lines.Select(l => l.MenuItemId).Distinct().ToArray();
+        var recipes = await db.Recipes
+            .Include(r => r.Lines)
+            .Where(r => menuItemIds.Contains(r.MenuItemId))
+            .ToDictionaryAsync(r => r.MenuItemId, ct);
+
+        if (recipes.Count == 0)
+            return;
+
+        var stockItemIds = recipes.Values.SelectMany(r => r.Lines).Select(l => l.StockItemId).Distinct().ToArray();
+        var stockItems = await db.StockItems
+            .Where(x => stockItemIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, ct);
+
+        foreach (var line in order.Lines)
+        {
+            if (!recipes.TryGetValue(line.MenuItemId, out var recipe))
+                continue;
+
+            foreach (var ingredient in recipe.Lines)
+            {
+                if (!stockItems.TryGetValue(ingredient.StockItemId, out var stockItem))
+                    continue;
+
+                var recipeUnitsNeeded = ingredient.Quantity / recipe.Yield * line.Quantity;
+                var stockUnitsConsumed = stockItem.ConversionFactor > 0
+                    ? recipeUnitsNeeded / stockItem.ConversionFactor
+                    : recipeUnitsNeeded;
+
+                var before = stockItem.Quantity;
+                var after = before - stockUnitsConsumed;
+
+                db.StockAdjustments.Add(new StockAdjustment
+                {
+                    StockItemId = stockItem.Id,
+                    Delta = -stockUnitsConsumed,
+                    QuantityBefore = before,
+                    QuantityAfter = after,
+                    Reason = $"Order #{order.OrderNumber} — {line.Name}",
+                    OrderId = order.Id,
+                    Kind = "Consumption"
+                });
+
+                stockItem.Quantity = after;
+                stockItem.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Idempotent via the ledger itself: skips if a Reversal-kind row already references this
+    /// order, so repeated Cancelled transitions never double-restore stock.
+    /// </summary>
+    private async Task ReverseConsumptionAsync(Order order, CancellationToken ct)
+    {
+        var alreadyReversed = await db.StockAdjustments
+            .AnyAsync(x => x.OrderId == order.Id && x.Kind == "Reversal", ct);
+        if (alreadyReversed)
+            return;
+
+        var consumptions = await db.StockAdjustments
+            .Where(x => x.OrderId == order.Id && x.Kind == "Consumption")
+            .ToListAsync(ct);
+        if (consumptions.Count == 0)
+            return;
+
+        var stockItemIds = consumptions.Select(x => x.StockItemId).Distinct().ToArray();
+        var stockItems = await db.StockItems
+            .Where(x => stockItemIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, ct);
+
+        foreach (var consumption in consumptions)
+        {
+            if (!stockItems.TryGetValue(consumption.StockItemId, out var stockItem))
+                continue;
+
+            var before = stockItem.Quantity;
+            var restore = -consumption.Delta;
+            var after = before + restore;
+
+            db.StockAdjustments.Add(new StockAdjustment
+            {
+                StockItemId = stockItem.Id,
+                Delta = restore,
+                QuantityBefore = before,
+                QuantityAfter = after,
+                Reason = $"Order #{order.OrderNumber} cancelled — reversal",
+                OrderId = order.Id,
+                Kind = "Reversal"
+            });
+
+            stockItem.Quantity = after;
+            stockItem.UpdatedAt = DateTimeOffset.UtcNow;
+        }
     }
 
     public async Task<(CompleteOrderResult Result, OrderDto? Order)> CompleteExistingOrderAsync(
@@ -155,8 +261,13 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         if (order is null)
             return (SetStatusResult.NotFound, null);
 
+        var wasAlreadyCancelled = order.Status == "Cancelled";
         order.Status = status;
         order.UpdatedAt = DateTimeOffset.UtcNow;
+
+        if (status == "Cancelled" && !wasAlreadyCancelled)
+            await ReverseConsumptionAsync(order, ct);
+
         await db.SaveChangesAsync(ct);
 
         return (SetStatusResult.Updated, ToDto(order));
@@ -207,5 +318,5 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.Tax,
         order.Total,
         order.CreatedAt,
-        order.Lines.Select(x => new OrderLineDto(x.Name, x.Quantity, x.Price, x.LineTotal)).ToArray());
+        order.Lines.Select(x => new OrderLineDto(x.Name, x.Quantity, x.Price, x.LineTotal, x.Notes)).ToArray());
 }

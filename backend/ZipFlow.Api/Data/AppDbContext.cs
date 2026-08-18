@@ -19,6 +19,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
     public DbSet<StockItem> StockItems => Set<StockItem>();
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
+    public DbSet<Recipe> Recipes => Set<Recipe>();
+    public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +110,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.ToTable("Category", "menu");
             b.HasKey(x => x.Id);
             b.Property(x => x.Name).HasMaxLength(160).IsRequired();
+            b.Property(x => x.Station).HasMaxLength(40);
             b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -147,6 +150,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Name).HasMaxLength(160).IsRequired();
             b.Property(x => x.Price).HasColumnType("decimal(18,2)");
             b.Property(x => x.LineTotal).HasColumnType("decimal(18,2)");
+            b.Property(x => x.Notes).HasMaxLength(300);
             b.HasOne(x => x.Order).WithMany(x => x.Lines).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.MenuItem).WithMany().HasForeignKey(x => x.MenuItemId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -162,6 +166,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.ParLevel).HasColumnType("decimal(18,3)");
             b.Property(x => x.ReorderLevel).HasColumnType("decimal(18,3)");
             b.Property(x => x.Cost).HasColumnType("decimal(18,2)");
+            b.Property(x => x.RecipeUnit).HasMaxLength(20);
+            b.Property(x => x.ConversionFactor).HasColumnType("decimal(18,6)");
             b.HasIndex(x => new { x.TenantId, x.Sku }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -174,7 +180,27 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.QuantityBefore).HasColumnType("decimal(18,3)");
             b.Property(x => x.QuantityAfter).HasColumnType("decimal(18,3)");
             b.Property(x => x.Reason).HasMaxLength(300).IsRequired();
+            b.Property(x => x.Kind).HasMaxLength(20).IsRequired();
+            b.HasIndex(x => new { x.OrderId, x.Kind });
             b.HasOne(x => x.StockItem).WithMany(x => x.Adjustments).HasForeignKey(x => x.StockItemId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Recipe>(b =>
+        {
+            b.ToTable("Recipe", "menu");
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.MenuItemId).IsUnique();
+            b.HasOne(x => x.MenuItem).WithMany().HasForeignKey(x => x.MenuItemId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RecipeIngredient>(b =>
+        {
+            b.ToTable("RecipeIngredient", "menu");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Quantity).HasColumnType("decimal(18,3)");
+            b.Property(x => x.Unit).HasMaxLength(20).IsRequired();
+            b.HasOne(x => x.Recipe).WithMany(x => x.Lines).HasForeignKey(x => x.RecipeId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.StockItem).WithMany().HasForeignKey(x => x.StockItemId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

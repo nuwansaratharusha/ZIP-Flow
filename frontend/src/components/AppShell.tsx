@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthContext'
-import { Icon } from './Icon'
+import { Icon, type IconName } from './Icon'
 
-const nav = [
-  { label: 'Overview', path: '/', icon: 'dashboard' as const },
-  { label: 'POS', path: '/pos', icon: 'pos' as const },
-  { label: 'Orders', path: '/orders', icon: 'orders' as const },
-  { label: 'Menu', path: '/menu', icon: 'menu' as const },
-  { label: 'Inventory', path: '/inventory', icon: 'inventory' as const },
-  { label: 'Kitchen', path: '/kitchen', icon: 'kitchen' as const },
-  { label: 'Reports', path: '/reports', icon: 'reports' as const },
+const nav: { label: string; path: string; icon: IconName }[] = [
+  { label: 'Overview', path: '/', icon: 'home' },
+  { label: 'POS', path: '/pos', icon: 'pos' },
+  { label: 'Orders', path: '/orders', icon: 'orders' },
+  { label: 'Menu', path: '/menu', icon: 'menu' },
+  { label: 'Inventory', path: '/inventory', icon: 'inventory' },
+  { label: 'Kitchen', path: '/kitchen', icon: 'kitchen' },
+  { label: 'Reports', path: '/reports', icon: 'reports' },
 ]
 
 export function AppShell() {
@@ -25,62 +25,84 @@ export function AppShell() {
   }, [])
 
   const timeLabel = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(time)
+  const tenantName = session?.tenant?.name ?? 'ZIP Flow'
+  const initials = session?.user?.displayName ? session.user.displayName.charAt(0).toUpperCase() : 'Z'
 
   return (
     <div className={`app-shell ${isPos ? 'pos-mode' : ''}`}>
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <div className="brand-mark small"><span>Z</span></div>
-          <div>
-            <strong>ZIP Flow</strong>
-            <span>Restaurant OS</span>
-          </div>
-        </div>
-
-        <nav className="sidebar-nav">
+      {/* Slim Dark Navigation Rail (Theme matching Screenshot 2) */}
+      <aside className="icon-rail" aria-label="Primary Navigation">
+        <div className="rail-top">
           {nav.map((item) => (
             <NavLink
               end={item.path === '/'}
               key={item.path}
               to={item.path}
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+              className={({ isActive }) => `rail-item ${isActive ? 'active-accent' : ''}`}
+              title={item.label}
             >
-              <Icon name={item.icon} />
-              <span>{item.label}</span>
+              {({ isActive }) => (
+                <>
+                  <Icon name={item.icon} size={22} filled={isActive} />
+                  <span className="rail-tooltip">{item.label}</span>
+                </>
+              )}
             </NavLink>
           ))}
-        </nav>
+        </div>
 
-        <div className="sidebar-bottom">
-          <button className="nav-item nav-button"><Icon name="settings" /><span>Settings</span></button>
-          <div className="sidebar-user">
-            <div className="avatar">{session?.user.displayName.charAt(0).toUpperCase()}</div>
-            <div className="user-copy">
-              <strong>{session?.user.displayName}</strong>
-              <span>{session?.defaultLocation?.name ?? 'Default location'}</span>
-            </div>
-            <button className="user-menu" onClick={logout} aria-label="Sign out"><Icon name="chevronDown" /></button>
-          </div>
+        <div className="rail-bottom">
+          <button
+            type="button"
+            className="rail-item"
+            title="Settings & System Preferences"
+            onClick={() => alert('Settings & Preferences')}
+          >
+            <Icon name="settings" size={22} />
+            <span className="rail-tooltip">Settings</span>
+          </button>
+          <button
+            type="button"
+            className="rail-item"
+            title="Help Center"
+            onClick={() => alert('ZIP Flow Restaurant OS')}
+          >
+            <Icon name="helpCircle" size={22} />
+            <span className="rail-tooltip">Help</span>
+          </button>
         </div>
       </aside>
 
       <section className="workspace">
         <header className="topbar">
           <div className="topbar-left">
-            <button className="location-switcher">
-              <span className="location-dot" />
-              <span>
-                <small>Location</small>
-                <strong>{session?.defaultLocation?.name ?? session?.tenant.name}</strong>
-              </span>
-              <Icon name="chevronDown" />
-            </button>
+            <div className="zipflow-brand-lockup">
+              <img
+                src="/images/m9Nra52axnIYWpM9arXpmaawnDk_1.png"
+                alt="ZIP Flow"
+                className="brand-logo-icon"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+              <div className="brand-title-group">
+                <strong className="brand-logo-text">{tenantName}</strong>
+                <span className="brand-sub-badge">Restaurant OS</span>
+              </div>
+            </div>
           </div>
 
           <div className="topbar-actions">
-            <span className="connection-state"><Icon name="wifi" /> Online</span>
-            <span className="topbar-time"><Icon name="clock" /> {timeLabel}</span>
-            <button className="profile-chip"><span>{session?.user.displayName.charAt(0).toUpperCase()}</span>{session?.user.displayName.split(' ')[0]}</button>
+            <span className="connection-state">
+              <Icon name="wifi" size={14} /> Online
+            </span>
+            <span className="topbar-time">
+              <Icon name="clock" size={14} /> {timeLabel}
+            </span>
+            <button className="profile-chip" onClick={logout} title="Click to Sign Out">
+              <span>{initials}</span>
+              {session?.user?.displayName.split(' ')[0]}
+            </button>
           </div>
         </header>
         <Outlet />

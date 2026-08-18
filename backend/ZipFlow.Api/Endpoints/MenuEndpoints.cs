@@ -4,7 +4,7 @@ using ZipFlow.Api.Services;
 
 namespace ZipFlow.Api.Endpoints;
 
-public sealed record CreateCategoryRequest(string Name, int SortOrder);
+public sealed record CreateCategoryRequest(string Name, int SortOrder, string? Station = null);
 public sealed record CreateMenuItemRequest(Guid CategoryId, string Name, string Sku, decimal Price);
 public sealed record UpdateMenuItemRequest(string Name, decimal Price, Guid CategoryId);
 public sealed record SetAvailabilityRequest(bool IsAvailable);
@@ -24,7 +24,7 @@ public static class MenuEndpoints
             if (string.IsNullOrWhiteSpace(request.Name))
                 return Results.BadRequest(ApiResponse<object>.Fail("Category name is required."));
 
-            var category = await menu.CreateCategoryAsync(current.TenantId, request.Name, request.SortOrder, ct);
+            var category = await menu.CreateCategoryAsync(current.TenantId, request.Name, request.SortOrder, request.Station, ct);
             return Results.Ok(ApiResponse<CategoryDto>.Ok(category));
         })
         .RequireAuthorization("permission:menu.categories.manage");

@@ -34,8 +34,16 @@ export function LoginPage() {
     <main className="auth-layout">
       <section className="auth-brand-panel">
         <div className="auth-brand-lockup">
-          <div className="brand-mark"><span>Z</span></div>
-          <strong>ZIP Flow</strong>
+          <img
+            src="/images/m9Nra52axnIYWpM9arXpmaawnDk_1.png"
+            alt="ZIP Flow"
+            className="auth-brand-logo"
+            onError={(e) => { e.currentTarget.style.display = 'none' }}
+          />
+          <div className="auth-brand-names">
+            <strong>ZIP Flow</strong>
+            <span>Restaurant OS</span>
+          </div>
         </div>
 
         <div className="auth-message">
@@ -49,13 +57,15 @@ export function LoginPage() {
           </div>
         </div>
 
-        <p className="auth-footer">Premium foundation · v0.2</p>
+        <p className="auth-footer">ZIP Flow · Restaurant Operating System</p>
       </section>
 
       <section className="auth-form-panel">
         <form className="login-card" onSubmit={submit}>
           <div className="login-card-heading">
-            <span className="login-icon"><Icon name="user" /></span>
+            <div className="login-icon-box">
+              <Icon name="user" size={18} />
+            </div>
             <div>
               <p className="eyebrow">Welcome back</p>
               <h2>Sign in to ZIP Flow</h2>

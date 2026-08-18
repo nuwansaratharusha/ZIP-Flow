@@ -5,6 +5,7 @@ import { LoginPage } from '../features/auth/LoginPage'
 import { ProtectedRoute } from '../features/auth/ProtectedRoute'
 import { DashboardPage } from '../features/dashboard/DashboardPage'
 import { InventoryPage } from '../features/inventory/InventoryPage'
+import { KitchenPage } from '../features/kitchen/KitchenPage'
 import { MenuPage } from '../features/menu/MenuPage'
 import { OrdersPage } from '../features/orders/OrdersPage'
 import { PosPage } from '../features/pos/PosPage'
@@ -37,7 +38,7 @@ export function App() {
               <Route path="orders" element={<OrdersPage />} />
               <Route path="menu" element={<MenuPage />} />
               <Route path="inventory" element={<InventoryPage />} />
-              <Route path="kitchen" element={<ComingSoon title="Kitchen Display" description="Real-time kitchen routing, ticket timers, bump, recall and expo workflows will use the same premium touch-first system." />} />
+              <Route path="kitchen" element={<KitchenPage />} />
               <Route path="reports" element={<ComingSoon title="Reports" description="Sales, margin, food cost, inventory variance and multi-location reporting will be added on top of trusted transaction data." />} />
             </Route>
           </Route>

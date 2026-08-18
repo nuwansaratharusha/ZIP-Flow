@@ -5,14 +5,14 @@ export function getItems() {
   return apiRequest<ApiEnvelope<StockItem[]>>('/api/inventory/items').then((res) => res.data)
 }
 
-export function createItem(input: { name: string; sku: string; unit: string; parLevel: number; reorderLevel: number; cost: number; initialQuantity: number }) {
+export function createItem(input: { name: string; sku: string; unit: string; parLevel: number; reorderLevel: number; cost: number; initialQuantity: number; recipeUnit: string; conversionFactor: number }) {
   return apiRequest<ApiEnvelope<StockItem>>('/api/inventory/items', {
     method: 'POST',
     body: JSON.stringify(input),
   }).then((res) => res.data)
 }
 
-export function updateItem(id: string, input: { name: string; sku: string; unit: string; parLevel: number; reorderLevel: number; cost: number }) {
+export function updateItem(id: string, input: { name: string; sku: string; unit: string; parLevel: number; reorderLevel: number; cost: number; recipeUnit: string; conversionFactor: number }) {
   return apiRequest<ApiEnvelope<StockItem>>(`/api/inventory/items/${id}`, {
     method: 'PUT',
     body: JSON.stringify(input),

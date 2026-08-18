@@ -8,6 +8,8 @@ export type StockItem = {
   reorderLevel: number
   cost: number
   isArchived: boolean
+  recipeUnit: string
+  conversionFactor: number
 }
 
 export type StockAdjustment = {
@@ -17,4 +19,6 @@ export type StockAdjustment = {
   quantityAfter: number
   reason: string
   createdAt: string
+  kind: 'Manual' | 'Consumption' | 'Reversal'
+  orderId: string | null
 }

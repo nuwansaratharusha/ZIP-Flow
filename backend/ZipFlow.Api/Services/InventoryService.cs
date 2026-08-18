@@ -6,10 +6,12 @@ namespace ZipFlow.Api.Services;
 
 public sealed record StockItemDto(
     Guid Id, string Name, string Sku, string Unit, decimal Quantity,
-    decimal ParLevel, decimal ReorderLevel, decimal Cost, bool IsArchived);
+    decimal ParLevel, decimal ReorderLevel, decimal Cost, bool IsArchived,
+    string RecipeUnit, decimal ConversionFactor);
 
 public sealed record StockAdjustmentDto(
-    Guid Id, decimal Delta, decimal QuantityBefore, decimal QuantityAfter, string Reason, DateTimeOffset CreatedAt);
+    Guid Id, decimal Delta, decimal QuantityBefore, decimal QuantityAfter, string Reason,
+    DateTimeOffset CreatedAt, string Kind, Guid? OrderId);
 
 public enum SaveStockItemResult
 {
@@ -31,10 +33,12 @@ public interface IInventoryService
     Task<IReadOnlyList<StockItemDto>> GetItemsAsync(Guid tenantId, CancellationToken ct);
 
     Task<(SaveStockItemResult Result, StockItemDto? Item)> CreateItemAsync(
-        Guid tenantId, string name, string sku, string unit, decimal parLevel, decimal reorderLevel, decimal cost, decimal initialQuantity, CancellationToken ct);
+        Guid tenantId, string name, string sku, string unit, decimal parLevel, decimal reorderLevel, decimal cost,
+        decimal initialQuantity, string recipeUnit, decimal conversionFactor, CancellationToken ct);
 
     Task<(SaveStockItemResult Result, StockItemDto? Item)> UpdateItemAsync(
-        Guid tenantId, Guid itemId, string name, string sku, string unit, decimal parLevel, decimal reorderLevel, decimal cost, CancellationToken ct);
+        Guid tenantId, Guid itemId, string name, string sku, string unit, decimal parLevel, decimal reorderLevel, decimal cost,
+        string recipeUnit, decimal conversionFactor, CancellationToken ct);
 
     Task<bool> ArchiveItemAsync(Guid tenantId, Guid itemId, CancellationToken ct);
 
@@ -57,7 +61,8 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
     }
 
     public async Task<(SaveStockItemResult Result, StockItemDto? Item)> CreateItemAsync(
-        Guid tenantId, string name, string sku, string unit, decimal parLevel, decimal reorderLevel, decimal cost, decimal initialQuantity, CancellationToken ct)
+        Guid tenantId, string name, string sku, string unit, decimal parLevel, decimal reorderLevel, decimal cost,
+        decimal initialQuantity, string recipeUnit, decimal conversionFactor, CancellationToken ct)
     {
         var normalizedSku = sku.Trim();
         var duplicate = await db.StockItems.AnyAsync(x => x.TenantId == tenantId && x.Sku.ToLower() == normalizedSku.ToLower(), ct);
@@ -73,7 +78,9 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
             ParLevel = parLevel,
             ReorderLevel = reorderLevel,
             Cost = cost,
-            Quantity = initialQuantity
+            Quantity = initialQuantity,
+            RecipeUnit = string.IsNullOrWhiteSpace(recipeUnit) ? unit.Trim() : recipeUnit.Trim(),
+            ConversionFactor = conversionFactor > 0 ? conversionFactor : 1
         };
 
         db.StockItems.Add(item);
@@ -83,7 +90,8 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
     }
 
     public async Task<(SaveStockItemResult Result, StockItemDto? Item)> UpdateItemAsync(
-        Guid tenantId, Guid itemId, string name, string sku, string unit, decimal parLevel, decimal reorderLevel, decimal cost, CancellationToken ct)
+        Guid tenantId, Guid itemId, string name, string sku, string unit, decimal parLevel, decimal reorderLevel, decimal cost,
+        string recipeUnit, decimal conversionFactor, CancellationToken ct)
     {
         var item = await db.StockItems.SingleOrDefaultAsync(x => x.Id == itemId && x.TenantId == tenantId, ct);
         if (item is null)
@@ -104,6 +112,8 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
         item.ParLevel = parLevel;
         item.ReorderLevel = reorderLevel;
         item.Cost = cost;
+        item.RecipeUnit = string.IsNullOrWhiteSpace(recipeUnit) ? unit.Trim() : recipeUnit.Trim();
+        item.ConversionFactor = conversionFactor > 0 ? conversionFactor : 1;
         item.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
@@ -143,7 +153,8 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
             Delta = delta,
             QuantityBefore = before,
             QuantityAfter = after,
-            Reason = reason.Trim()
+            Reason = reason.Trim(),
+            Kind = "Manual"
         });
 
         item.Quantity = after;
@@ -159,11 +170,12 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
             .AsNoTracking()
             .Where(x => x.StockItemId == itemId && x.StockItem.TenantId == tenantId)
             .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new StockAdjustmentDto(x.Id, x.Delta, x.QuantityBefore, x.QuantityAfter, x.Reason, x.CreatedAt))
+            .Select(x => new StockAdjustmentDto(x.Id, x.Delta, x.QuantityBefore, x.QuantityAfter, x.Reason, x.CreatedAt, x.Kind, x.OrderId))
             .ToListAsync(ct);
     }
 
     private static StockItemDto ToDto(StockItem item) => new(
         item.Id, item.Name, item.Sku, item.Unit, item.Quantity,
-        item.ParLevel, item.ReorderLevel, item.Cost, item.IsArchived);
+        item.ParLevel, item.ReorderLevel, item.Cost, item.IsArchived,
+        item.RecipeUnit, item.ConversionFactor);
 }

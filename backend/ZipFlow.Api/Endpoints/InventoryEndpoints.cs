@@ -4,8 +4,12 @@ using ZipFlow.Api.Services;
 
 namespace ZipFlow.Api.Endpoints;
 
-public sealed record CreateStockItemRequest(string Name, string Sku, string Unit, decimal ParLevel, decimal ReorderLevel, decimal Cost, decimal InitialQuantity);
-public sealed record UpdateStockItemRequest(string Name, string Sku, string Unit, decimal ParLevel, decimal ReorderLevel, decimal Cost);
+public sealed record CreateStockItemRequest(
+    string Name, string Sku, string Unit, decimal ParLevel, decimal ReorderLevel, decimal Cost, decimal InitialQuantity,
+    string? RecipeUnit = null, decimal ConversionFactor = 1);
+public sealed record UpdateStockItemRequest(
+    string Name, string Sku, string Unit, decimal ParLevel, decimal ReorderLevel, decimal Cost,
+    string? RecipeUnit = null, decimal ConversionFactor = 1);
 public sealed record AdjustStockRequest(decimal Delta, string Reason);
 
 public static class InventoryEndpoints
@@ -26,7 +30,8 @@ public static class InventoryEndpoints
                 return Results.BadRequest(ApiResponse<object>.Fail("Values cannot be negative."));
 
             var (result, item) = await inventory.CreateItemAsync(
-                current.TenantId, request.Name, request.Sku, request.Unit, request.ParLevel, request.ReorderLevel, request.Cost, request.InitialQuantity, ct);
+                current.TenantId, request.Name, request.Sku, request.Unit, request.ParLevel, request.ReorderLevel, request.Cost,
+                request.InitialQuantity, request.RecipeUnit ?? request.Unit, request.ConversionFactor, ct);
 
             return result switch
             {
@@ -45,7 +50,8 @@ public static class InventoryEndpoints
                 return Results.BadRequest(ApiResponse<object>.Fail("Values cannot be negative."));
 
             var (result, item) = await inventory.UpdateItemAsync(
-                current.TenantId, id, request.Name, request.Sku, request.Unit, request.ParLevel, request.ReorderLevel, request.Cost, ct);
+                current.TenantId, id, request.Name, request.Sku, request.Unit, request.ParLevel, request.ReorderLevel, request.Cost,
+                request.RecipeUnit ?? request.Unit, request.ConversionFactor, ct);
 
             return result switch
             {

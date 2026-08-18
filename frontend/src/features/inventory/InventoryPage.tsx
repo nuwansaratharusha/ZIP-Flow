@@ -17,7 +17,10 @@ function stockBadge(item: StockItem) {
   return null
 }
 
-type EditDraft = { name: string; sku: string; unit: string; parLevel: string; reorderLevel: string; cost: string }
+type EditDraft = {
+  name: string; sku: string; unit: string; parLevel: string; reorderLevel: string; cost: string
+  recipeUnit: string; conversionFactor: string
+}
 
 export function InventoryPage() {
   const [items, setItems] = useState<StockItem[]>([])
@@ -34,8 +37,11 @@ export function InventoryPage() {
   const [addError, setAddError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const [recipeUnit, setRecipeUnit] = useState('')
+  const [conversionFactor, setConversionFactor] = useState('1')
+
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<EditDraft>({ name: '', sku: '', unit: '', parLevel: '', reorderLevel: '', cost: '' })
+  const [editDraft, setEditDraft] = useState<EditDraft>({ name: '', sku: '', unit: '', parLevel: '', reorderLevel: '', cost: '', recipeUnit: '', conversionFactor: '1' })
   const [editError, setEditError] = useState('')
 
   const [adjustItem, setAdjustItem] = useState<StockItem | null>(null)
@@ -61,14 +67,19 @@ export function InventoryPage() {
     const reorder = Number(reorderLevel || 0)
     const costValue = Number(cost || 0)
     const qty = Number(initialQuantity || 0)
+    const factor = Number(conversionFactor || 1)
 
     if (!name.trim() || !sku.trim() || !unit.trim()) return setAddError('Name, SKU and unit are required.')
     if ([par, reorder, costValue, qty].some((v) => !Number.isFinite(v) || v < 0)) return setAddError('Enter valid, non-negative numbers.')
+    if (!Number.isFinite(factor) || factor <= 0) return setAddError('Conversion factor must be a positive number.')
 
     setSaving(true)
     try {
-      await createItem({ name: name.trim(), sku: sku.trim(), unit: unit.trim(), parLevel: par, reorderLevel: reorder, cost: costValue, initialQuantity: qty })
-      setName(''); setSku(''); setUnit(''); setParLevel(''); setReorderLevel(''); setCost(''); setInitialQuantity('')
+      await createItem({
+        name: name.trim(), sku: sku.trim(), unit: unit.trim(), parLevel: par, reorderLevel: reorder, cost: costValue, initialQuantity: qty,
+        recipeUnit: recipeUnit.trim() || unit.trim(), conversionFactor: factor,
+      })
+      setName(''); setSku(''); setUnit(''); setParLevel(''); setReorderLevel(''); setCost(''); setInitialQuantity(''); setRecipeUnit(''); setConversionFactor('1')
       await refetch()
     } catch (err) {
       setAddError(err instanceof Error ? err.message : 'Failed to add stock item.')
@@ -87,6 +98,8 @@ export function InventoryPage() {
       parLevel: String(item.parLevel),
       reorderLevel: String(item.reorderLevel),
       cost: String(item.cost),
+      recipeUnit: item.recipeUnit,
+      conversionFactor: String(item.conversionFactor),
     })
   }
 
@@ -95,14 +108,17 @@ export function InventoryPage() {
     const par = Number(editDraft.parLevel)
     const reorder = Number(editDraft.reorderLevel)
     const costValue = Number(editDraft.cost)
+    const factor = Number(editDraft.conversionFactor)
 
     if (!editDraft.name.trim() || !editDraft.sku.trim() || !editDraft.unit.trim()) return setEditError('Name, SKU and unit are required.')
     if ([par, reorder, costValue].some((v) => !Number.isFinite(v) || v < 0)) return setEditError('Enter valid, non-negative numbers.')
+    if (!Number.isFinite(factor) || factor <= 0) return setEditError('Conversion factor must be a positive number.')
 
     try {
       await updateItem(item.id, {
         name: editDraft.name.trim(), sku: editDraft.sku.trim(), unit: editDraft.unit.trim(),
         parLevel: par, reorderLevel: reorder, cost: costValue,
+        recipeUnit: editDraft.recipeUnit.trim() || editDraft.unit.trim(), conversionFactor: factor,
       })
       setEditingId(null)
       await refetch()
@@ -173,6 +189,13 @@ export function InventoryPage() {
 
       {loadError && <div className="alert error">{loadError}</div>}
 
+      {items.length > 0 && (
+        <div className="inventory-valuation-stat">
+          <span>Total inventory value</span>
+          <strong>{currency.format(items.reduce((sum, item) => sum + item.quantity * item.cost, 0))}</strong>
+        </div>
+      )}
+
       <section className="section-card">
         <div className="section-heading">
           <div><p className="eyebrow">Stock</p><h2>Items</h2></div>
@@ -226,6 +249,27 @@ export function InventoryPage() {
                 )}
               </div>
             ))}
+            {items.map((item) => editingId === item.id && (
+              <div className="inventory-edit-extra" key={`${item.id}-extra`}>
+                <label>
+                  Recipe unit
+                  <input
+                    placeholder="e.g. g"
+                    value={editDraft.recipeUnit}
+                    onChange={(e) => setEditDraft({ ...editDraft, recipeUnit: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Conversion factor (recipe units per 1 {editDraft.unit || 'stock unit'})
+                  <input
+                    inputMode="decimal"
+                    placeholder="e.g. 1000"
+                    value={editDraft.conversionFactor}
+                    onChange={(e) => setEditDraft({ ...editDraft, conversionFactor: e.target.value })}
+                  />
+                </label>
+              </div>
+            ))}
             {editingId && editError && <div className="alert error inventory-edit-error">{editError}</div>}
           </div>
         )}
@@ -240,8 +284,11 @@ export function InventoryPage() {
             <input placeholder="Reorder level" inputMode="decimal" value={reorderLevel} onChange={(e) => setReorderLevel(e.target.value)} />
             <input placeholder="Cost" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} />
             <input placeholder="Starting qty" inputMode="decimal" value={initialQuantity} onChange={(e) => setInitialQuantity(e.target.value)} />
+            <input placeholder="Recipe unit (e.g. g)" value={recipeUnit} onChange={(e) => setRecipeUnit(e.target.value)} />
+            <input placeholder="Conversion factor" inputMode="decimal" value={conversionFactor} onChange={(e) => setConversionFactor(e.target.value)} />
             <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Adding…' : 'Add item'}</button>
           </div>
+          <p className="muted inventory-conversion-hint">Conversion factor = how many recipe units make up 1 stock unit (e.g. stock unit "kg", recipe unit "g", factor 1000).</p>
           {addError && <div className="alert error">{addError}</div>}
         </form>
       </section>
@@ -279,6 +326,7 @@ export function InventoryPage() {
                 <div className="order-detail-line inventory-history-line" key={entry.id}>
                   <span>
                     <strong>{entry.quantityBefore} → {entry.quantityAfter}</strong> ({entry.delta > 0 ? '+' : ''}{entry.delta})
+                    <span className={`order-status-badge inventory-kind-badge ${entry.kind.toLowerCase()}`}>{entry.kind}</span>
                     <br /><span className="muted">{entry.reason}</span>
                   </span>
                   <span className="muted">{timeFormat.format(new Date(entry.createdAt))}</span>

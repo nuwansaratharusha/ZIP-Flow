@@ -30,7 +30,11 @@ public sealed class FoundationSeeder(
         ("pos.orders.manage", "POS", "Change order status"),
         ("inventory.items.view", "Inventory", "View stock items"),
         ("inventory.items.manage", "Inventory", "Manage stock items"),
-        ("inventory.stock.adjust", "Inventory", "Adjust stock quantities")
+        ("inventory.stock.adjust", "Inventory", "Adjust stock quantities"),
+        ("menu.recipes.view", "Menu", "View recipes"),
+        ("menu.recipes.manage", "Menu", "Manage recipes"),
+        ("kitchen.tickets.view", "Kitchen", "View kitchen tickets"),
+        ("kitchen.tickets.manage", "Kitchen", "Bump and recall kitchen tickets")
     ];
 
     public async Task RunAsync(CancellationToken ct = default)

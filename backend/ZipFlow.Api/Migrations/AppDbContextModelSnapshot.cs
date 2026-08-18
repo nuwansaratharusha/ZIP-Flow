@@ -140,6 +140,10 @@ namespace ZipFlow.Api.Migrations
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
 
+                    b.Property<string>("Station")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -318,6 +322,10 @@ namespace ZipFlow.Api.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("nvarchar(160)");
 
+                    b.Property<string>("Notes")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
                     b.Property<Guid>("OrderId")
                         .HasColumnType("uniqueidentifier");
 
@@ -372,6 +380,67 @@ namespace ZipFlow.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("Permission", "iam");
+                });
+
+            modelBuilder.Entity("ZipFlow.Api.Domain.Recipe", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("MenuItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Yield")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MenuItemId")
+                        .IsUnique();
+
+                    b.ToTable("Recipe", "menu");
+                });
+
+            modelBuilder.Entity("ZipFlow.Api.Domain.RecipeIngredient", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,3)");
+
+                    b.Property<Guid>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("StockItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipeId");
+
+                    b.HasIndex("StockItemId");
+
+                    b.ToTable("RecipeIngredient", "menu");
                 });
 
             modelBuilder.Entity("ZipFlow.Api.Domain.Role", b =>
@@ -443,6 +512,14 @@ namespace ZipFlow.Api.Migrations
                     b.Property<decimal>("Delta")
                         .HasColumnType("decimal(18,3)");
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal>("QuantityAfter")
                         .HasColumnType("decimal(18,3)");
 
@@ -464,6 +541,8 @@ namespace ZipFlow.Api.Migrations
 
                     b.HasIndex("StockItemId");
 
+                    b.HasIndex("OrderId", "Kind");
+
                     b.ToTable("StockAdjustment", "inventory");
                 });
 
@@ -472,6 +551,9 @@ namespace ZipFlow.Api.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("ConversionFactor")
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<decimal>("Cost")
                         .HasColumnType("decimal(18,2)");
@@ -492,6 +574,11 @@ namespace ZipFlow.Api.Migrations
 
                     b.Property<decimal>("Quantity")
                         .HasColumnType("decimal(18,3)");
+
+                    b.Property<string>("RecipeUnit")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<decimal>("ReorderLevel")
                         .HasColumnType("decimal(18,3)");
@@ -672,6 +759,36 @@ namespace ZipFlow.Api.Migrations
                     b.Navigation("Order");
                 });
 
+            modelBuilder.Entity("ZipFlow.Api.Domain.Recipe", b =>
+                {
+                    b.HasOne("ZipFlow.Api.Domain.MenuItem", "MenuItem")
+                        .WithMany()
+                        .HasForeignKey("MenuItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MenuItem");
+                });
+
+            modelBuilder.Entity("ZipFlow.Api.Domain.RecipeIngredient", b =>
+                {
+                    b.HasOne("ZipFlow.Api.Domain.Recipe", "Recipe")
+                        .WithMany("Lines")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ZipFlow.Api.Domain.StockItem", "StockItem")
+                        .WithMany()
+                        .HasForeignKey("StockItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Recipe");
+
+                    b.Navigation("StockItem");
+                });
+
             modelBuilder.Entity("ZipFlow.Api.Domain.Role", b =>
                 {
                     b.HasOne("ZipFlow.Api.Domain.Tenant", "Tenant")
@@ -761,6 +878,11 @@ namespace ZipFlow.Api.Migrations
             modelBuilder.Entity("ZipFlow.Api.Domain.Permission", b =>
                 {
                     b.Navigation("RolePermissions");
+                });
+
+            modelBuilder.Entity("ZipFlow.Api.Domain.Recipe", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("ZipFlow.Api.Domain.Role", b =>

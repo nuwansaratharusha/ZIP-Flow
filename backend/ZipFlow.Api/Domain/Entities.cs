@@ -96,6 +96,7 @@ public sealed class Category : EntityBase
     public string Name { get; set; } = string.Empty;
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
+    public string? Station { get; set; }
     public ICollection<MenuItem> Items { get; set; } = new List<MenuItem>();
 }
 
@@ -138,6 +139,7 @@ public sealed class OrderLine : EntityBase
     public decimal Price { get; set; }
     public int Quantity { get; set; }
     public decimal LineTotal { get; set; }
+    public string? Notes { get; set; }
 }
 
 public sealed class StockItem : EntityBase
@@ -152,6 +154,8 @@ public sealed class StockItem : EntityBase
     public decimal ReorderLevel { get; set; }
     public decimal Cost { get; set; }
     public bool IsArchived { get; set; }
+    public string RecipeUnit { get; set; } = string.Empty;
+    public decimal ConversionFactor { get; set; } = 1;
     public ICollection<StockAdjustment> Adjustments { get; set; } = new List<StockAdjustment>();
 }
 
@@ -163,4 +167,24 @@ public sealed class StockAdjustment : EntityBase
     public decimal QuantityBefore { get; set; }
     public decimal QuantityAfter { get; set; }
     public string Reason { get; set; } = string.Empty;
+    public Guid? OrderId { get; set; }
+    public string Kind { get; set; } = "Manual";
+}
+
+public sealed class Recipe : EntityBase
+{
+    public Guid MenuItemId { get; set; }
+    public MenuItem MenuItem { get; set; } = null!;
+    public int Yield { get; set; } = 1;
+    public ICollection<RecipeIngredient> Lines { get; set; } = new List<RecipeIngredient>();
+}
+
+public sealed class RecipeIngredient : EntityBase
+{
+    public Guid RecipeId { get; set; }
+    public Recipe Recipe { get; set; } = null!;
+    public Guid StockItemId { get; set; }
+    public StockItem StockItem { get; set; } = null!;
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = string.Empty;
 }

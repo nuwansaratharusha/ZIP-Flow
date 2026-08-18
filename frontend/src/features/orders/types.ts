@@ -3,6 +3,7 @@ export type OrderLine = {
   quantity: number
   price: number
   lineTotal: number
+  notes: string | null
 }
 
 export const ORDER_STATUSES = ['Open', 'Sent', 'Preparing', 'Ready', 'Completed', 'Cancelled'] as const
@@ -25,4 +26,5 @@ export type Order = {
 export type OrderLineRequest = {
   menuItemId: string
   quantity: number
+  notes?: string
 }
