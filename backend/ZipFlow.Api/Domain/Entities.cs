@@ -181,6 +181,14 @@ public sealed class StockItem : EntityBase
     public string RecipeUnit { get; set; } = string.Empty;
     public decimal ConversionFactor { get; set; } = 1;
     public ICollection<StockAdjustment> Adjustments { get; set; } = new List<StockAdjustment>();
+
+    /// <summary>
+    /// Postgres system column mapped as an EF Core concurrency token (see AppDbContext:
+    /// IsRowVersion()). Every UPDATE to this row implicitly checks xmin, so a stale
+    /// read-modify-write on Quantity throws DbUpdateConcurrencyException instead of
+    /// silently overwriting a concurrent decrement.
+    /// </summary>
+    public uint RowVersion { get; set; }
 }
 
 public sealed class StockAdjustment : EntityBase

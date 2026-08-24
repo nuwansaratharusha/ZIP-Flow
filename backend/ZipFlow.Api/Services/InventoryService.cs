@@ -147,7 +147,7 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
         if (after < 0)
             return (AdjustStockResult.NegativeResult, null);
 
-        db.StockAdjustments.Add(new StockAdjustment
+        var adjustment = new StockAdjustment
         {
             StockItemId = item.Id,
             Delta = delta,
@@ -155,13 +155,55 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
             QuantityAfter = after,
             Reason = reason.Trim(),
             Kind = "Manual"
-        });
+        };
+        db.StockAdjustments.Add(adjustment);
 
         item.Quantity = after;
         item.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
+        await SaveChangesWithStockRetryAsync(item, adjustment, ct);
 
         return (AdjustStockResult.Adjusted, ToDto(item));
+    }
+
+    /// <summary>
+    /// StockItem.Quantity is guarded by a Postgres xmin concurrency token (see AppDbContext),
+    /// so a stale read-modify-write throws DbUpdateConcurrencyException on SaveChanges instead
+    /// of silently clobbering a concurrent update (issue #3). On conflict, re-anchor to the
+    /// fresh database quantity/xmin, re-apply the same delta, shift the ledger row recorded in
+    /// this call by the same amount, then retry. Mirrors OrderService's stock-save retry.
+    /// </summary>
+    private async Task SaveChangesWithStockRetryAsync(StockItem item, StockAdjustment adjustment, CancellationToken ct)
+    {
+        const int maxAttempts = 5;
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            {
+                var entry = db.Entry(item);
+                var databaseValues = await entry.GetDatabaseValuesAsync(ct)
+                    ?? throw new InvalidOperationException(
+                        $"Stock item {item.Id} was deleted concurrently while updating its quantity.");
+
+                var proposedQuantity = entry.CurrentValues.GetValue<decimal>(nameof(StockItem.Quantity));
+                var originalQuantity = entry.OriginalValues.GetValue<decimal>(nameof(StockItem.Quantity));
+                var delta = proposedQuantity - originalQuantity;
+
+                var freshQuantity = databaseValues.GetValue<decimal>(nameof(StockItem.Quantity));
+                var shift = freshQuantity - originalQuantity;
+
+                entry.CurrentValues[nameof(StockItem.Quantity)] = freshQuantity + delta;
+                entry.OriginalValues.SetValues(databaseValues);
+
+                adjustment.QuantityBefore += shift;
+                adjustment.QuantityAfter += shift;
+            }
+        }
     }
 
     public async Task<IReadOnlyList<StockAdjustmentDto>> GetAdjustmentsAsync(Guid tenantId, Guid itemId, CancellationToken ct)

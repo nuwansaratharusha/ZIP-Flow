@@ -206,6 +206,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.ConversionFactor).HasColumnType("decimal(18,6)");
             b.HasIndex(x => new { x.TenantId, x.Sku }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            // Concurrency token backed by Postgres' xmin system column (Npgsql pattern —
+            // SQL Server's [Timestamp]/rowversion has no Postgres equivalent). Guards the
+            // read-modify-write on Quantity against lost updates from concurrent orders.
+            b.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").ValueGeneratedOnAddOrUpdate().IsRowVersion();
         });
 
         modelBuilder.Entity<StockAdjustment>(b =>
