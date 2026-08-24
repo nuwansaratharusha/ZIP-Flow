@@ -126,8 +126,13 @@ export function PosPage() {
 
   const round2 = (n: number) => Math.round(n * 100) / 100
 
-  const subtotal = order.reduce((sum, line) => sum + line.price * line.quantity, 0)
-  const convertedSubtotal = round2(subtotal * activeCurrency.rate)
+  // Match server (OrderService.CreateOrderAsync): round each line's unit price to 2dp
+  // *before* multiplying by quantity, then sum the rounded line totals. Rounding the
+  // subtotal once after summing raw prices can diverge from the server by a cent.
+  const convertedSubtotal = order.reduce((sum, line) => {
+    const roundedUnitPrice = round2(line.price * activeCurrency.rate)
+    return sum + roundedUnitPrice * line.quantity
+  }, 0)
   const serviceCharge = round2(convertedSubtotal * serviceChargeRate)
   const tax = round2((convertedSubtotal + serviceCharge) * vatRate)
   const total = convertedSubtotal + serviceCharge + tax
@@ -495,7 +500,7 @@ export function PosPage() {
                 <div>
                   <strong>{line.name}</strong>
                 </div>
-                <strong>{formatMoney(line.price * line.quantity * activeCurrency.rate, activeCurrency.symbol)}</strong>
+                <strong>{formatMoney(round2(line.price * activeCurrency.rate) * line.quantity, activeCurrency.symbol)}</strong>
               </div>
               <div className="line-actions">
                 <button
