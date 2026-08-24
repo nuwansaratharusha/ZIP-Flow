@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using ZipFlow.Api.Data;
 using ZipFlow.Api.Domain;
 
@@ -109,16 +110,10 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             rate = currencyRate.Rate;
         }
 
-        var nextOrderNumber = (await db.Orders
-            .Where(x => x.TenantId == tenantId)
-            .Select(x => (int?)x.OrderNumber)
-            .MaxAsync(ct) ?? 0) + 1;
-
         var order = new Order
         {
             TenantId = tenantId,
             LocationId = locationId,
-            OrderNumber = nextOrderNumber,
             ServiceMode = serviceMode,
             Status = status,
             PaymentMethod = paymentMethod,
@@ -162,10 +157,35 @@ public sealed class OrderService(AppDbContext db) : IOrderService
 
         db.Orders.Add(order);
         await ConsumeIngredientsAsync(order, ct);
-        await db.SaveChangesAsync(ct);
+
+        // OrderNumber is MAX(OrderNumber)+1 per tenant. Two terminals can read the same max
+        // and collide on the unique (TenantId, OrderNumber) index when they save concurrently.
+        // Retry with a fresh read on that specific collision rather than failing the sale.
+        const int maxAttempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            order.OrderNumber = (await db.Orders
+                .Where(x => x.TenantId == tenantId)
+                .Select(x => (int?)x.OrderNumber)
+                .MaxAsync(ct) ?? 0) + 1;
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                break;
+            }
+            catch (DbUpdateException ex) when (attempt < maxAttempts && IsOrderNumberCollision(ex))
+            {
+                // Another terminal claimed this OrderNumber first; loop and re-read the max.
+            }
+        }
 
         return (CreateOrderResult.Created, ToDto(order));
     }
+
+    private static bool IsOrderNumberCollision(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } pg
+        && (pg.ConstraintName?.Contains("OrderNumber", StringComparison.OrdinalIgnoreCase) ?? false);
 
     /// <summary>
     /// Never blocks the sale and never rejects on a negative result — a negative theoretical
