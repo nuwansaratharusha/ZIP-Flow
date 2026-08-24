@@ -1,15 +1,16 @@
 services:
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: zipflow-sqlserver
+  postgres:
+    image: postgres:16-alpine
+    container_name: zipflow-postgres
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-ChangeThisLocalPassword!1}"
+      POSTGRES_USER: "${POSTGRES_USER:-zipflow}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-ChangeThisLocalPassword!1}"
+      POSTGRES_DB: "${POSTGRES_DB:-ZipFlow}"
     ports:
-      - "1433:1433"
+      - "5432:5432"
     volumes:
-      - zipflow_sql_data:/var/opt/mssql
+      - zipflow_pg_data:/var/lib/postgresql/data
     restart: unless-stopped
 
 volumes:
-  zipflow_sql_data:
+  zipflow_pg_data:
