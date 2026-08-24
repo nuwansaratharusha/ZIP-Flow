@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { formatMoney } from '../../lib/currency'
 import { getCatalog } from '../menu/api'
@@ -52,6 +52,10 @@ export function PosPage() {
   const [guestPickerOpen, setGuestPickerOpen] = useState(false)
 
   const [currentOrderId, setCurrentOrderId] = useState<string | null>(null)
+  // Client-generated id for the in-flight "send to kitchen" call. Kept stable across
+  // retries (e.g. after a timeout/dropped connection) so the server can recognize a
+  // retry as the same order instead of creating a duplicate.
+  const pendingOrderIdRef = useRef<string | null>(null)
   const [sending, setSending] = useState(false)
   const [paying, setPaying] = useState(false)
   const [tenderedInput, setTenderedInput] = useState('')
@@ -169,18 +173,26 @@ export function PosPage() {
   const resetOrder = () => {
     setOrder([])
     setCurrentOrderId(null)
+    pendingOrderIdRef.current = null
   }
 
   const handleSendToKitchen = async () => {
     setActionError('')
     setLastPrintableOrderId(null)
     setSending(true)
+    // Reuse the same client-generated id across retries of this order so a dropped
+    // connection followed by a retry can't create a duplicate order server-side.
+    if (!pendingOrderIdRef.current) {
+      pendingOrderIdRef.current = crypto.randomUUID()
+    }
     try {
       const created = await sendToKitchen(
         serviceMode,
         order.map((line) => ({ menuItemId: line.id, quantity: line.quantity, notes: line.notes })),
-        activeCurrency.code
+        activeCurrency.code,
+        pendingOrderIdRef.current
       )
+      pendingOrderIdRef.current = null
       setCurrentOrderId(created.id)
       setConfirmation('Sent to kitchen.')
     } catch (err) {

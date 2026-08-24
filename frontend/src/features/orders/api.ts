@@ -1,10 +1,10 @@
 import { apiRequest, type ApiEnvelope } from '../../lib/api'
 import type { Order, OrderLineRequest, OrderStatus } from './types'
 
-export function sendToKitchen(serviceMode: string, lines: OrderLineRequest[], currencyCode?: string) {
+export function sendToKitchen(serviceMode: string, lines: OrderLineRequest[], currencyCode?: string, id?: string) {
   return apiRequest<ApiEnvelope<Order>>('/api/orders/send-to-kitchen', {
     method: 'POST',
-    body: JSON.stringify({ serviceMode, currencyCode, lines }),
+    body: JSON.stringify({ serviceMode, currencyCode, lines, id }),
   }).then((res) => res.data)
 }
 
