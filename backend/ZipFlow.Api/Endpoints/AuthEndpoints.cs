@@ -20,6 +20,23 @@ public static class AuthEndpoints
                 : Results.Ok(ApiResponse<LoginResponse>.Ok(result));
         });
 
+        group.MapPost("/refresh", async (RefreshRequest request, IAuthService auth, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.RefreshToken))
+                return Results.BadRequest(ApiResponse<object>.Fail("Refresh token is required."));
+
+            var result = await auth.RefreshAsync(request, ct);
+            return result is null
+                ? Results.Unauthorized()
+                : Results.Ok(ApiResponse<LoginResponse>.Ok(result));
+        });
+
+        group.MapPost("/logout", async (RefreshRequest request, IAuthService auth, CancellationToken ct) =>
+        {
+            await auth.RevokeAsync(request.RefreshToken, ct);
+            return Results.NoContent();
+        });
+
         return app;
     }
 }

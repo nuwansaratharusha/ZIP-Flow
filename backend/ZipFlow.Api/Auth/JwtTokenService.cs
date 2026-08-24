@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -10,6 +11,8 @@ namespace ZipFlow.Api.Auth;
 public interface IJwtTokenService
 {
     string CreateAccessToken(AppUser user, IReadOnlyCollection<Role> roles);
+    string GenerateRefreshToken();
+    string HashRefreshToken(string refreshToken);
 }
 
 public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenService
@@ -44,5 +47,17 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public string GenerateRefreshToken()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(64);
+        return Convert.ToBase64String(bytes);
+    }
+
+    public string HashRefreshToken(string refreshToken)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken));
+        return Convert.ToBase64String(bytes);
     }
 }

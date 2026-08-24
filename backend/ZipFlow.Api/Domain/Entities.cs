@@ -57,6 +57,19 @@ public sealed class AppUser : EntityBase
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
 }
 
+public sealed class RefreshToken : EntityBase
+{
+    public Guid UserId { get; set; }
+    public AppUser User { get; set; } = null!;
+    public string TokenHash { get; set; } = string.Empty;
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+    public string? ReplacedByTokenHash { get; set; }
+    public bool IsRevoked => RevokedAt.HasValue;
+    public bool IsExpired => DateTimeOffset.UtcNow >= ExpiresAt;
+    public bool IsActive => !IsRevoked && !IsExpired;
+}
+
 public sealed class Role : EntityBase
 {
     public Guid TenantId { get; set; }
