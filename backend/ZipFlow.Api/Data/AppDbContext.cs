@@ -49,7 +49,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Code).HasMaxLength(12).IsRequired();
             b.Property(x => x.Symbol).HasMaxLength(8).IsRequired();
             b.Property(x => x.Rate).HasColumnType("decimal(18,6)");
-            b.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Code }).IsUnique().HasFilter("\"IsArchived\" = false");
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -187,7 +187,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Name).HasMaxLength(80).IsRequired();
             b.Property(x => x.Section).HasMaxLength(40).IsRequired();
             b.Property(x => x.Status).HasMaxLength(20).IsRequired();
-            b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique().HasFilter("\"IsArchived\" = false");
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
