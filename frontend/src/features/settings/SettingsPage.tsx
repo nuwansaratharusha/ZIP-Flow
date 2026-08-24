@@ -55,6 +55,23 @@ export function SettingsPage() {
     setDrafts(Object.fromEntries(settings.supported.map((c) => [c.id!, { symbol: c.symbol, rate: String(c.rate) }])))
   }
 
+  // Like applyCurrencySettings, but only refreshes the draft for the row that was just
+  // saved/removed/added (or any row not yet tracked in drafts) instead of rebuilding the
+  // whole drafts record - so other rows' in-progress unsaved edits are left untouched.
+  const mergeCurrencySettings = (settings: CurrencySettings, changedId?: string) => {
+    setCurrencySettings(settings)
+    setBaseCode(settings.baseCode)
+    setBaseSymbol(settings.baseSymbol)
+    setDrafts((prev) => {
+      const next: Record<string, { symbol: string; rate: string }> = {}
+      for (const c of settings.supported) {
+        const id = c.id!
+        next[id] = id === changedId || !(id in prev) ? { symbol: c.symbol, rate: String(c.rate) } : prev[id]
+      }
+      return next
+    })
+  }
+
   useEffect(() => {
     Promise.all([getReceiptSettings(), getCurrencies(), getTaxSettings()])
       .then(([receipt, currencies, tax]) => {
@@ -121,7 +138,7 @@ export function SettingsPage() {
 
     setRowSavingId(id)
     try {
-      applyCurrencySettings(await updateCurrency(id, draft.symbol.trim(), rate))
+      mergeCurrencySettings(await updateCurrency(id, draft.symbol.trim(), rate), id)
     } catch (err) {
       setCurrencyError(err instanceof Error ? err.message : 'Failed to update currency.')
     } finally {
@@ -133,7 +150,7 @@ export function SettingsPage() {
     setCurrencyError('')
     setRowSavingId(id)
     try {
-      applyCurrencySettings(await removeCurrency(id))
+      mergeCurrencySettings(await removeCurrency(id), id)
     } catch (err) {
       setCurrencyError(err instanceof Error ? err.message : 'Failed to remove currency.')
     } finally {
@@ -150,7 +167,7 @@ export function SettingsPage() {
 
     setAddingCurrency(true)
     try {
-      applyCurrencySettings(await addCurrency(newCode.trim(), newSymbol.trim(), rate))
+      mergeCurrencySettings(await addCurrency(newCode.trim(), newSymbol.trim(), rate))
       setNewCode('')
       setNewSymbol('')
       setNewRate('')
