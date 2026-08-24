@@ -160,6 +160,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.CurrencyCode).HasMaxLength(12).IsRequired();
             b.Property(x => x.CurrencySymbol).HasMaxLength(8).IsRequired();
             b.Property(x => x.ExchangeRate).HasColumnType("decimal(18,6)");
+            b.Property(x => x.BaseCurrencyCode).HasMaxLength(12).IsRequired();
+            b.Property(x => x.BaseCurrencySubtotal).HasColumnType("decimal(18,2)");
+            b.Property(x => x.BaseCurrencyTotal).HasColumnType("decimal(18,2)");
             b.Property(x => x.AmountTendered).HasColumnType("decimal(18,2)");
             b.Property(x => x.ChangeDue).HasColumnType("decimal(18,2)");
             b.HasIndex(x => new { x.TenantId, x.CreatedAt });

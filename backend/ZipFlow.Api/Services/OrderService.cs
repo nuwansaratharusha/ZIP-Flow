@@ -124,7 +124,8 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             PaymentMethod = paymentMethod,
             CurrencyCode = currCode,
             CurrencySymbol = currSymbol,
-            ExchangeRate = rate
+            ExchangeRate = rate,
+            BaseCurrencyCode = tenant.CurrencyCode
         };
 
         decimal subtotal = 0;
@@ -149,6 +150,12 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.ServiceCharge = Math.Round(subtotal * tenant.ServiceChargeRate, 2, MidpointRounding.AwayFromZero);
         order.Tax = Math.Round((subtotal + order.ServiceCharge) * tenant.VatRate, 2, MidpointRounding.AwayFromZero);
         order.Total = order.Subtotal + order.ServiceCharge + order.Tax;
+
+        // Subtotal/Total above are in the transaction currency (post-FX). Also store the
+        // pre-conversion amounts in the tenant's base currency so cross-currency reports
+        // (sum of Total across orders) always aggregate a consistent unit.
+        order.BaseCurrencySubtotal = Math.Round(order.Subtotal / rate, 2, MidpointRounding.AwayFromZero);
+        order.BaseCurrencyTotal = Math.Round(order.Total / rate, 2, MidpointRounding.AwayFromZero);
 
         if (status == "Completed")
         {
