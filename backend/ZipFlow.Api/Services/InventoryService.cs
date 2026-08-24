@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ZipFlow.Api.Data;
 using ZipFlow.Api.Domain;
+using ZipFlow.Api.Security;
 
 namespace ZipFlow.Api.Services;
 
@@ -48,7 +49,7 @@ public interface IInventoryService
     Task<IReadOnlyList<StockAdjustmentDto>> GetAdjustmentsAsync(Guid tenantId, Guid itemId, CancellationToken ct);
 }
 
-public sealed class InventoryService(AppDbContext db) : IInventoryService
+public sealed class InventoryService(AppDbContext db, IAuditLogService audit, ICurrentRequestContext current) : IInventoryService
 {
     public async Task<IReadOnlyList<StockItemDto>> GetItemsAsync(Guid tenantId, CancellationToken ct)
     {
@@ -160,6 +161,11 @@ public sealed class InventoryService(AppDbContext db) : IInventoryService
         item.Quantity = after;
         item.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+
+        await audit.LogAsync(
+            tenantId, current.UserId, null, "StockItem", item.Id.ToString(), "StockAdjusted",
+            summary: $"{item.Name} adjusted by {delta} ({reason.Trim()})",
+            metadata: new { item.Sku, delta, before, after, reason = reason.Trim() }, ct: ct);
 
         return (AdjustStockResult.Adjusted, ToDto(item));
     }
