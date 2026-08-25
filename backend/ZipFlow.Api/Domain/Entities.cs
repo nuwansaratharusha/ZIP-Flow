@@ -153,6 +153,19 @@ public sealed class Order : EntityBase
     public ICollection<OrderLine> Lines { get; set; } = new List<OrderLine>();
 }
 
+/// <summary>
+/// One row per tenant. OrderNumber values are drawn from here via a single atomic
+/// UPDATE ... RETURNING statement (see OrderService.NextOrderNumberAsync), so no two
+/// terminals can ever be handed the same number — the database serializes the increment
+/// itself instead of the app coordinating retries after a collision.
+/// </summary>
+public sealed class OrderNumberCounter
+{
+    public Guid TenantId { get; set; }
+    public Tenant Tenant { get; set; } = null!;
+    public int NextValue { get; set; } = 1;
+}
+
 public sealed class OrderLine : EntityBase
 {
     public Guid OrderId { get; set; }
