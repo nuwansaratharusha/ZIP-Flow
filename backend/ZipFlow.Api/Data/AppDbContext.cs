@@ -23,6 +23,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
     public DbSet<RestaurantTable> RestaurantTables => Set<RestaurantTable>();
     public DbSet<CurrencyRate> CurrencyRates => Set<CurrencyRate>();
+    public DbSet<OrderNumberCounter> OrderNumberCounters => Set<OrderNumberCounter>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -166,6 +167,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasIndex(x => new { x.TenantId, x.OrderNumber }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OrderNumberCounter>(b =>
+        {
+            b.ToTable("OrderNumberCounter", "pos");
+            b.HasKey(x => x.TenantId);
+            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<OrderLine>(b =>

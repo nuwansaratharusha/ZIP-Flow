@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using ZipFlow.Api.Data;
 using ZipFlow.Api.Domain;
 
@@ -158,34 +157,32 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         db.Orders.Add(order);
         await ConsumeIngredientsAsync(order, ct);
 
-        // OrderNumber is MAX(OrderNumber)+1 per tenant. Two terminals can read the same max
-        // and collide on the unique (TenantId, OrderNumber) index when they save concurrently.
-        // Retry with a fresh read on that specific collision rather than failing the sale.
-        const int maxAttempts = 5;
-        for (var attempt = 1; ; attempt++)
-        {
-            order.OrderNumber = (await db.Orders
-                .Where(x => x.TenantId == tenantId)
-                .Select(x => (int?)x.OrderNumber)
-                .MaxAsync(ct) ?? 0) + 1;
-
-            try
-            {
-                await db.SaveChangesAsync(ct);
-                break;
-            }
-            catch (DbUpdateException ex) when (attempt < maxAttempts && IsOrderNumberCollision(ex))
-            {
-                // Another terminal claimed this OrderNumber first; loop and re-read the max.
-            }
-        }
+        order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
+        await db.SaveChangesAsync(ct);
 
         return (CreateOrderResult.Created, ToDto(order));
     }
 
-    private static bool IsOrderNumberCollision(DbUpdateException ex) =>
-        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } pg
-        && (pg.ConstraintName?.Contains("OrderNumber", StringComparison.OrdinalIgnoreCase) ?? false);
+    /// <summary>
+    /// Atomically claims the next order number for a tenant via a single upsert statement,
+    /// instead of reading MAX(OrderNumber) and hoping no other terminal grabs the same value
+    /// first. Postgres serializes the row-level update itself, so two terminals calling this
+    /// at the same instant are guaranteed distinct results — no collision is possible, so no
+    /// retry-on-conflict is needed.
+    /// </summary>
+    private async Task<int> NextOrderNumberAsync(Guid tenantId, CancellationToken ct)
+    {
+        var next = await db.Database.SqlQueryRaw<int>(
+            """
+            INSERT INTO pos."OrderNumberCounter" ("TenantId", "NextValue")
+            VALUES ({0}, 2)
+            ON CONFLICT ("TenantId") DO UPDATE
+                SET "NextValue" = pos."OrderNumberCounter"."NextValue" + 1
+            RETURNING "NextValue" - 1
+            """, tenantId).ToListAsync(ct);
+
+        return next[0];
+    }
 
     /// <summary>
     /// Never blocks the sale and never rejects on a negative result — a negative theoretical
