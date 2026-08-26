@@ -4,7 +4,7 @@ using ZipFlow.Api.Services;
 
 namespace ZipFlow.Api.Endpoints;
 
-public sealed record SendToKitchenRequest(string ServiceMode, string? CurrencyCode, IReadOnlyList<OrderLineRequest> Lines);
+public sealed record SendToKitchenRequest(string ServiceMode, string? CurrencyCode, IReadOnlyList<OrderLineRequest> Lines, Guid? Id = null);
 public sealed record CompletePaymentRequest(string ServiceMode, string PaymentMethod, string? CurrencyCode, decimal? AmountTendered, IReadOnlyList<OrderLineRequest> Lines);
 public sealed record CompleteOrderRequest(string PaymentMethod, decimal? AmountTendered);
 public sealed record SetOrderStatusRequest(string Status);
@@ -27,7 +27,7 @@ public static class OrderEndpoints
             if (request.Lines is null || request.Lines.Count == 0 || request.Lines.Any(x => x.Quantity < 1))
                 return Results.BadRequest(ApiResponse<object>.Fail("Order must contain at least one line with quantity 1 or more."));
 
-            var (result, order) = await orders.CreateSentOrderAsync(current.TenantId, current.DefaultLocationId, request.ServiceMode, request.CurrencyCode, request.Lines, ct);
+            var (result, order) = await orders.CreateSentOrderAsync(current.TenantId, current.DefaultLocationId, request.Id, request.ServiceMode, request.CurrencyCode, request.Lines, ct);
             return result switch
             {
                 CreateOrderResult.Created => Results.Ok(ApiResponse<OrderDto>.Ok(order!)),

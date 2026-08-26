@@ -50,7 +50,7 @@ public enum SetStatusResult
 public interface IOrderService
 {
     Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
+        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
 
     Task<(CreateOrderResult Result, OrderDto? Order)> CreateCompletedOrderAsync(
         Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
@@ -69,19 +69,32 @@ public interface IOrderService
 public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurrentRequestContext current) : IOrderService
 {
     public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
-        => await CreateOrderAsync(tenantId, locationId, serviceMode, "Sent", null, currencyCode, null, lines, ct);
+        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
+        => await CreateOrderAsync(tenantId, locationId, clientOrderId, serviceMode, "Sent", null, currencyCode, null, lines, ct);
 
     public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateCompletedOrderAsync(
         Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
-        => await CreateOrderAsync(tenantId, locationId, serviceMode, "Completed", paymentMethod, currencyCode, amountTendered, lines, ct);
+        => await CreateOrderAsync(tenantId, locationId, null, serviceMode, "Completed", paymentMethod, currencyCode, amountTendered, lines, ct);
 
     private async Task<(CreateOrderResult Result, OrderDto? Order)> CreateOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string status, string? paymentMethod, string? currencyCode,
+        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string status, string? paymentMethod, string? currencyCode,
         decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
     {
         if (lines.Count == 0)
             return (CreateOrderResult.EmptyOrder, null);
+
+        // Idempotency: if the client supplied its own order Id (e.g. to survive a
+        // dropped-connection retry), and an order with that Id already exists for this
+        // tenant, treat this call as already processed instead of creating a duplicate.
+        if (clientOrderId is Guid existingId)
+        {
+            var existingOrder = await db.Orders
+                .AsNoTracking()
+                .Include(x => x.Lines)
+                .SingleOrDefaultAsync(x => x.Id == existingId && x.TenantId == tenantId, ct);
+            if (existingOrder is not null)
+                return (CreateOrderResult.Created, ToDto(existingOrder));
+        }
 
         var itemIds = lines.Select(x => x.MenuItemId).Distinct().ToArray();
         var menuItems = await db.MenuItems
@@ -122,6 +135,9 @@ public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurre
             ExchangeRate = rate,
             BaseCurrencyCode = tenant.CurrencyCode
         };
+
+        if (clientOrderId is Guid newId)
+            order.Id = newId;
 
         decimal subtotal = 0;
         foreach (var line in lines)
@@ -166,7 +182,23 @@ public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurre
         var stockAdjustments = await ConsumeIngredientsAsync(order, ct);
 
         order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
-        await SaveChangesWithStockRetryAsync(stockAdjustments, ct);
+
+        try
+        {
+            await SaveChangesWithStockRetryAsync(stockAdjustments, ct);
+        }
+        catch (DbUpdateException) when (clientOrderId is not null)
+        {
+            // Two retries of the same client-generated order Id raced each other; the other
+            // one won. Return its result instead of failing or double-consuming stock.
+            var winner = await db.Orders
+                .AsNoTracking()
+                .Include(x => x.Lines)
+                .SingleOrDefaultAsync(x => x.Id == clientOrderId && x.TenantId == tenantId, ct);
+            if (winner is not null)
+                return (CreateOrderResult.Created, ToDto(winner));
+            throw;
+        }
 
         await audit.LogAsync(
             tenantId, current.UserId, locationId, "Order", order.Id.ToString(), "OrderCreated",
