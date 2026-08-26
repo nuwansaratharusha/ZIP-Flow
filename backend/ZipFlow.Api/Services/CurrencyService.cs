@@ -109,6 +109,8 @@ public sealed class CurrencyService(AppDbContext db) : ICurrencyService
         var normalizedCode = code.Trim().ToUpperInvariant();
         if (normalizedCode.Length == 0 || symbol.Trim().Length == 0)
             return (false, "A currency code and symbol are required.", null);
+        if (normalizedCode.Length != 3)
+            return (false, "The currency code must be exactly 3 letters (ISO 4217).", null);
 
         var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Id == tenantId, ct);
         if (tenant is null) return (false, "Tenant not found.", null);

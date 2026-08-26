@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ZipFlow.Api.Data;
@@ -11,9 +12,11 @@ using ZipFlow.Api.Data;
 namespace ZipFlow.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260824181058_ArchivedRowsExcludedFromUniqueIndexes")]
+    partial class ArchivedRowsExcludedFromUniqueIndexes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -66,46 +69,6 @@ namespace ZipFlow.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("User", "iam");
-                });
-
-            modelBuilder.Entity("ZipFlow.Api.Domain.RefreshToken", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ReplacedByTokenHash")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTimeOffset?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("TokenHash")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("UserId", "ExpiresAt");
-
-                    b.ToTable("RefreshToken", "iam");
                 });
 
             modelBuilder.Entity("ZipFlow.Api.Domain.AuditLog", b =>
@@ -335,17 +298,6 @@ namespace ZipFlow.Api.Migrations
                     b.Property<decimal>("AmountTendered")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<string>("BaseCurrencyCode")
-                        .IsRequired()
-                        .HasMaxLength(12)
-                        .HasColumnType("character varying(12)");
-
-                    b.Property<decimal>("BaseCurrencySubtotal")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("BaseCurrencyTotal")
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<decimal>("ChangeDue")
                         .HasColumnType("decimal(18,2)");
 
@@ -458,19 +410,6 @@ namespace ZipFlow.Api.Migrations
                     b.HasIndex("OrderId");
 
                     b.ToTable("OrderLine", "pos");
-                });
-
-            modelBuilder.Entity("ZipFlow.Api.Domain.OrderNumberCounter", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("NextValue")
-                        .HasColumnType("integer");
-
-                    b.HasKey("TenantId");
-
-                    b.ToTable("OrderNumberCounter", "pos");
                 });
 
             modelBuilder.Entity("ZipFlow.Api.Domain.Permission", b =>
@@ -971,17 +910,6 @@ namespace ZipFlow.Api.Migrations
                     b.Navigation("Order");
                 });
 
-            modelBuilder.Entity("ZipFlow.Api.Domain.OrderNumberCounter", b =>
-                {
-                    b.HasOne("ZipFlow.Api.Domain.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ZipFlow.Api.Domain.Recipe", b =>
                 {
                     b.HasOne("ZipFlow.Api.Domain.MenuItem", "MenuItem")
@@ -1073,17 +1001,6 @@ namespace ZipFlow.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ZipFlow.Api.Domain.RefreshToken", b =>
-                {
-                    b.HasOne("ZipFlow.Api.Domain.AppUser", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("ZipFlow.Api.Domain.UserRole", b =>

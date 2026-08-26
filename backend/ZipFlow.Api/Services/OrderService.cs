@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ZipFlow.Api.Data;
 using ZipFlow.Api.Domain;
+using ZipFlow.Api.Security;
 
 namespace ZipFlow.Api.Services;
 
@@ -65,7 +66,7 @@ public interface IOrderService
     Task<IReadOnlyList<OrderDto>> GetOrdersAsync(Guid tenantId, string? search, string? status, CancellationToken ct);
 }
 
-public sealed class OrderService(AppDbContext db) : IOrderService
+public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurrentRequestContext current) : IOrderService
 {
     public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
         Guid tenantId, Guid? locationId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
@@ -109,22 +110,17 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             rate = currencyRate.Rate;
         }
 
-        var nextOrderNumber = (await db.Orders
-            .Where(x => x.TenantId == tenantId)
-            .Select(x => (int?)x.OrderNumber)
-            .MaxAsync(ct) ?? 0) + 1;
-
         var order = new Order
         {
             TenantId = tenantId,
             LocationId = locationId,
-            OrderNumber = nextOrderNumber,
             ServiceMode = serviceMode,
             Status = status,
             PaymentMethod = paymentMethod,
             CurrencyCode = currCode,
             CurrencySymbol = currSymbol,
-            ExchangeRate = rate
+            ExchangeRate = rate,
+            BaseCurrencyCode = tenant.CurrencyCode
         };
 
         decimal subtotal = 0;
@@ -150,6 +146,12 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.Tax = Math.Round((subtotal + order.ServiceCharge) * tenant.VatRate, 2, MidpointRounding.AwayFromZero);
         order.Total = order.Subtotal + order.ServiceCharge + order.Tax;
 
+        // Subtotal/Total above are in the transaction currency (post-FX). Also store the
+        // pre-conversion amounts in the tenant's base currency so cross-currency reports
+        // (sum of Total across orders) always aggregate a consistent unit.
+        order.BaseCurrencySubtotal = Math.Round(order.Subtotal / rate, 2, MidpointRounding.AwayFromZero);
+        order.BaseCurrencyTotal = Math.Round(order.Total / rate, 2, MidpointRounding.AwayFromZero);
+
         if (status == "Completed")
         {
             var tendered = amountTendered ?? order.Total;
@@ -162,9 +164,37 @@ public sealed class OrderService(AppDbContext db) : IOrderService
 
         db.Orders.Add(order);
         await ConsumeIngredientsAsync(order, ct);
+
+        order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
         await db.SaveChangesAsync(ct);
 
+        await audit.LogAsync(
+            tenantId, current.UserId, locationId, "Order", order.Id.ToString(), "OrderCreated",
+            summary: $"Order #{order.OrderNumber} created ({status}, {serviceMode})",
+            metadata: new { order.OrderNumber, status, serviceMode, order.Total }, ct: ct);
+
         return (CreateOrderResult.Created, ToDto(order));
+    }
+
+    /// <summary>
+    /// Atomically claims the next order number for a tenant via a single upsert statement,
+    /// instead of reading MAX(OrderNumber) and hoping no other terminal grabs the same value
+    /// first. Postgres serializes the row-level update itself, so two terminals calling this
+    /// at the same instant are guaranteed distinct results — no collision is possible, so no
+    /// retry-on-conflict is needed.
+    /// </summary>
+    private async Task<int> NextOrderNumberAsync(Guid tenantId, CancellationToken ct)
+    {
+        var next = await db.Database.SqlQueryRaw<int>(
+            """
+            INSERT INTO pos."OrderNumberCounter" ("TenantId", "NextValue")
+            VALUES ({0}, 2)
+            ON CONFLICT ("TenantId") DO UPDATE
+                SET "NextValue" = pos."OrderNumberCounter"."NextValue" + 1
+            RETURNING "NextValue" - 1
+            """, tenantId).ToListAsync(ct);
+
+        return next[0];
     }
 
     /// <summary>
@@ -295,6 +325,11 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
+        await audit.LogAsync(
+            tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderCompleted",
+            summary: $"Order #{order.OrderNumber} payment completed via {paymentMethod}",
+            metadata: new { order.OrderNumber, paymentMethod, order.Total }, ct: ct);
+
         return (CompleteOrderResult.Completed, ToDto(order));
     }
 
@@ -316,6 +351,21 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             await ReverseConsumptionAsync(order, ct);
 
         await db.SaveChangesAsync(ct);
+
+        if (status == "Cancelled" && !wasAlreadyCancelled)
+        {
+            await audit.LogAsync(
+                tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderVoided",
+                summary: $"Order #{order.OrderNumber} voided/cancelled",
+                metadata: new { order.OrderNumber, order.Total }, ct: ct);
+        }
+        else
+        {
+            await audit.LogAsync(
+                tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderStatusChanged",
+                summary: $"Order #{order.OrderNumber} status set to {status}",
+                metadata: new { order.OrderNumber, status }, ct: ct);
+        }
 
         return (SetStatusResult.Updated, ToDto(order));
     }
