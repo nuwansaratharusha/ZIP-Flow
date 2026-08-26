@@ -1,30 +1,23 @@
 import { apiRequest, type ApiEnvelope } from '../../lib/api'
 import type { Order, OrderLineRequest, OrderStatus } from './types'
 
-export function sendToKitchen(serviceMode: string, lines: OrderLineRequest[], currencyCode?: string, id?: string) {
-  return apiRequest<ApiEnvelope<Order>>('/api/orders/send-to-kitchen', {
-    method: 'POST',
-    body: JSON.stringify({ serviceMode, currencyCode, lines, id }),
-  }).then((res) => res.data)
-}
-
-export function completeOrder(orderId: string, paymentMethod: string, amountTendered?: number) {
-  return apiRequest<ApiEnvelope<Order>>(`/api/orders/${orderId}/complete`, {
-    method: 'POST',
-    body: JSON.stringify({ paymentMethod, amountTendered }),
-  }).then((res) => res.data)
-}
-
-export function createCompletedOrder(
+export function createOrder(
   serviceMode: string,
   paymentMethod: string,
   lines: OrderLineRequest[],
-  currencyCode?: string,
-  amountTendered?: number
+  options?: { destinationLabel?: string; currencyCode?: string; amountTendered?: number; id?: string }
 ) {
-  return apiRequest<ApiEnvelope<Order>>('/api/orders/complete-payment', {
+  return apiRequest<ApiEnvelope<Order>>('/api/orders', {
     method: 'POST',
-    body: JSON.stringify({ serviceMode, paymentMethod, currencyCode, amountTendered, lines }),
+    body: JSON.stringify({
+      serviceMode,
+      destinationLabel: options?.destinationLabel,
+      paymentMethod,
+      currencyCode: options?.currencyCode,
+      amountTendered: options?.amountTendered,
+      lines,
+      id: options?.id,
+    }),
   }).then((res) => res.data)
 }
 
