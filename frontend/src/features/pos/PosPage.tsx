@@ -146,6 +146,10 @@ export function PosPage() {
     return tables.filter((t) => t.section === tableSectionFilter)
   }, [tables, tableSectionFilter])
 
+  // Round-half-away-from-zero to 2dp, matching backend's
+  // Math.Round(x, 2, MidpointRounding.AwayFromZero) (OrderService.cs).
+  // JS's Math.round already rounds .5 up toward +Infinity, which is
+  // equivalent to AwayFromZero for the non-negative money values used here.
   const round2 = (n: number) => Math.round(n * 100) / 100
 
   // activeCurrency stays null until the tenant's real base currency has loaded; fall back to a
@@ -155,8 +159,15 @@ export function PosPage() {
   const currencyRate = activeCurrency?.rate ?? 1
   const currencySymbol = activeCurrency?.symbol ?? ''
 
-  const subtotal = order.reduce((sum, line) => sum + line.price * line.quantity, 0)
-  const convertedSubtotal = round2(subtotal * currencyRate)
+  // Mirror backend per-line rounding: each line's price is converted to the
+  // active currency and rounded to 2dp *before* being multiplied by quantity
+  // and summed, rather than rounding the whole subtotal once. Rounding the
+  // whole subtotal in one shot (as this used to do) can disagree with the
+  // backend by a cent on some orders.
+  const convertedSubtotal = order.reduce((sum, line) => {
+    const convertedPrice = round2(line.price * currencyRate)
+    return sum + convertedPrice * line.quantity
+  }, 0)
   const serviceCharge = round2(convertedSubtotal * serviceChargeRate)
   const tax = round2((convertedSubtotal + serviceCharge) * vatRate)
   const total = convertedSubtotal + serviceCharge + tax
