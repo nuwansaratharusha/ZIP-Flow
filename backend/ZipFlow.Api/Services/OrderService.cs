@@ -109,16 +109,10 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             rate = currencyRate.Rate;
         }
 
-        var nextOrderNumber = (await db.Orders
-            .Where(x => x.TenantId == tenantId)
-            .Select(x => (int?)x.OrderNumber)
-            .MaxAsync(ct) ?? 0) + 1;
-
         var order = new Order
         {
             TenantId = tenantId,
             LocationId = locationId,
-            OrderNumber = nextOrderNumber,
             ServiceMode = serviceMode,
             Status = status,
             PaymentMethod = paymentMethod,
@@ -162,9 +156,32 @@ public sealed class OrderService(AppDbContext db) : IOrderService
 
         db.Orders.Add(order);
         await ConsumeIngredientsAsync(order, ct);
+
+        order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
         await db.SaveChangesAsync(ct);
 
         return (CreateOrderResult.Created, ToDto(order));
+    }
+
+    /// <summary>
+    /// Atomically claims the next order number for a tenant via a single upsert statement,
+    /// instead of reading MAX(OrderNumber) and hoping no other terminal grabs the same value
+    /// first. Postgres serializes the row-level update itself, so two terminals calling this
+    /// at the same instant are guaranteed distinct results — no collision is possible, so no
+    /// retry-on-conflict is needed.
+    /// </summary>
+    private async Task<int> NextOrderNumberAsync(Guid tenantId, CancellationToken ct)
+    {
+        var next = await db.Database.SqlQueryRaw<int>(
+            """
+            INSERT INTO pos."OrderNumberCounter" ("TenantId", "NextValue")
+            VALUES ({0}, 2)
+            ON CONFLICT ("TenantId") DO UPDATE
+                SET "NextValue" = pos."OrderNumberCounter"."NextValue" + 1
+            RETURNING "NextValue" - 1
+            """, tenantId).ToListAsync(ct);
+
+        return next[0];
     }
 
     /// <summary>
