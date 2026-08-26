@@ -165,6 +165,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasKey(x => x.Id);
             b.Property(x => x.ServiceMode).HasMaxLength(20).IsRequired();
             b.Property(x => x.Status).HasMaxLength(20).IsRequired();
+            b.Property(x => x.PaymentState).HasMaxLength(20).IsRequired();
+            b.Property(x => x.DestinationLabel).HasMaxLength(20);
             b.Property(x => x.PaymentMethod).HasMaxLength(20);
             b.Property(x => x.Subtotal).HasColumnType("decimal(18,2)");
             b.Property(x => x.ServiceCharge).HasColumnType("decimal(18,2)");
