@@ -12,6 +12,8 @@ public sealed record OrderDto(
     int OrderNumber,
     string ServiceMode,
     string Status,
+    string PaymentState,
+    string? DestinationLabel,
     string? PaymentMethod,
     decimal Subtotal,
     decimal ServiceCharge,
@@ -49,11 +51,9 @@ public enum SetStatusResult
 
 public interface IOrderService
 {
-    Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
-        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
-
-    Task<(CreateOrderResult Result, OrderDto? Order)> CreateCompletedOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
+    Task<(CreateOrderResult Result, OrderDto? Order)> CreateOrderAsync(
+        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? destinationLabel,
+        string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
 
     Task<(CompleteOrderResult Result, OrderDto? Order)> CompleteExistingOrderAsync(
         Guid tenantId, Guid orderId, string paymentMethod, decimal? amountTendered, CancellationToken ct);
@@ -68,17 +68,9 @@ public interface IOrderService
 
 public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurrentRequestContext current) : IOrderService
 {
-    public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
-        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
-        => await CreateOrderAsync(tenantId, locationId, clientOrderId, serviceMode, "Sent", null, currencyCode, null, lines, ct);
-
-    public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateCompletedOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
-        => await CreateOrderAsync(tenantId, locationId, null, serviceMode, "Completed", paymentMethod, currencyCode, amountTendered, lines, ct);
-
-    private async Task<(CreateOrderResult Result, OrderDto? Order)> CreateOrderAsync(
-        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string status, string? paymentMethod, string? currencyCode,
-        decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
+    public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateOrderAsync(
+        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? destinationLabel,
+        string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
     {
         if (lines.Count == 0)
             return (CreateOrderResult.EmptyOrder, null);
@@ -128,7 +120,8 @@ public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurre
             TenantId = tenantId,
             LocationId = locationId,
             ServiceMode = serviceMode,
-            Status = status,
+            Status = "Sent",
+            PaymentState = "Paid",
             PaymentMethod = paymentMethod,
             CurrencyCode = currCode,
             CurrencySymbol = currSymbol,
@@ -168,20 +161,24 @@ public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurre
         order.BaseCurrencySubtotal = Math.Round(order.Subtotal / rate, 2, MidpointRounding.AwayFromZero);
         order.BaseCurrencyTotal = Math.Round(order.Total / rate, 2, MidpointRounding.AwayFromZero);
 
-        if (status == "Completed")
-        {
-            var tendered = amountTendered ?? order.Total;
-            if (tendered < order.Total)
-                return (CreateOrderResult.InsufficientTender, null);
+        var tendered = amountTendered ?? order.Total;
+        if (tendered < order.Total)
+            return (CreateOrderResult.InsufficientTender, null);
 
-            order.AmountTendered = tendered;
-            order.ChangeDue = tendered - order.Total;
-        }
+        order.AmountTendered = tendered;
+        order.ChangeDue = tendered - order.Total;
 
         db.Orders.Add(order);
         var stockAdjustments = await ConsumeIngredientsAsync(order, ct);
 
         order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
+
+        // Eat-in keeps whatever marker number the cashier typed; takeaway/delivery get no
+        // cashier-entered destination, so the order number itself doubles as the collection
+        // number handed to the customer.
+        order.DestinationLabel = string.Equals(serviceMode, "Dine in", StringComparison.OrdinalIgnoreCase)
+            ? (string.IsNullOrWhiteSpace(destinationLabel) ? null : destinationLabel.Trim())
+            : order.OrderNumber.ToString();
 
         try
         {
@@ -202,8 +199,8 @@ public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurre
 
         await audit.LogAsync(
             tenantId, current.UserId, locationId, "Order", order.Id.ToString(), "OrderCreated",
-            summary: $"Order #{order.OrderNumber} created ({status}, {serviceMode})",
-            metadata: new { order.OrderNumber, status, serviceMode, order.Total }, ct: ct);
+            summary: $"Order #{order.OrderNumber} created and paid ({paymentMethod}, {serviceMode})",
+            metadata: new { order.OrderNumber, paymentMethod, serviceMode, order.Total }, ct: ct);
 
         return (CreateOrderResult.Created, ToDto(order));
     }
@@ -516,6 +513,8 @@ public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurre
         order.OrderNumber,
         order.ServiceMode,
         order.Status,
+        order.PaymentState,
+        order.DestinationLabel,
         order.PaymentMethod,
         order.Subtotal,
         order.ServiceCharge,

@@ -4,8 +4,9 @@ using ZipFlow.Api.Services;
 
 namespace ZipFlow.Api.Endpoints;
 
-public sealed record SendToKitchenRequest(string ServiceMode, string? CurrencyCode, IReadOnlyList<OrderLineRequest> Lines, Guid? Id = null);
-public sealed record CompletePaymentRequest(string ServiceMode, string PaymentMethod, string? CurrencyCode, decimal? AmountTendered, IReadOnlyList<OrderLineRequest> Lines);
+public sealed record CreateOrderRequest(
+    string ServiceMode, string? DestinationLabel, string PaymentMethod, string? CurrencyCode,
+    decimal? AmountTendered, IReadOnlyList<OrderLineRequest> Lines, Guid? Id = null);
 public sealed record CompleteOrderRequest(string PaymentMethod, decimal? AmountTendered);
 public sealed record SetOrderStatusRequest(string Status);
 
@@ -20,25 +21,7 @@ public static class OrderEndpoints
     {
         var group = app.MapGroup("/api/orders").WithTags("Orders");
 
-        group.MapPost("/send-to-kitchen", async (SendToKitchenRequest request, ICurrentRequestContext current, IOrderService orders, CancellationToken ct) =>
-        {
-            if (!ValidServiceModes.Contains(request.ServiceMode))
-                return Results.BadRequest(ApiResponse<object>.Fail("Invalid service mode."));
-            if (request.Lines is null || request.Lines.Count == 0 || request.Lines.Any(x => x.Quantity < 1))
-                return Results.BadRequest(ApiResponse<object>.Fail("Order must contain at least one line with quantity 1 or more."));
-
-            var (result, order) = await orders.CreateSentOrderAsync(current.TenantId, current.DefaultLocationId, request.Id, request.ServiceMode, request.CurrencyCode, request.Lines, ct);
-            return result switch
-            {
-                CreateOrderResult.Created => Results.Ok(ApiResponse<OrderDto>.Ok(order!)),
-                CreateOrderResult.ItemNotFound => Results.BadRequest(ApiResponse<object>.Fail("One or more menu items could not be found.")),
-                CreateOrderResult.UnsupportedCurrency => Results.BadRequest(ApiResponse<object>.Fail("Unsupported currency.")),
-                _ => Results.BadRequest(ApiResponse<object>.Fail("Unable to send order to kitchen."))
-            };
-        })
-        .RequireAuthorization("permission:pos.orders.create");
-
-        group.MapPost("/complete-payment", async (CompletePaymentRequest request, ICurrentRequestContext current, IOrderService orders, CancellationToken ct) =>
+        group.MapPost("/", async (CreateOrderRequest request, ICurrentRequestContext current, IOrderService orders, CancellationToken ct) =>
         {
             if (!ValidServiceModes.Contains(request.ServiceMode))
                 return Results.BadRequest(ApiResponse<object>.Fail("Invalid service mode."));
@@ -47,14 +30,16 @@ public static class OrderEndpoints
             if (request.Lines is null || request.Lines.Count == 0 || request.Lines.Any(x => x.Quantity < 1))
                 return Results.BadRequest(ApiResponse<object>.Fail("Order must contain at least one line with quantity 1 or more."));
 
-            var (result, order) = await orders.CreateCompletedOrderAsync(current.TenantId, current.DefaultLocationId, request.ServiceMode, request.PaymentMethod, request.CurrencyCode, request.AmountTendered, request.Lines, ct);
+            var (result, order) = await orders.CreateOrderAsync(
+                current.TenantId, current.DefaultLocationId, request.Id, request.ServiceMode, request.DestinationLabel,
+                request.PaymentMethod, request.CurrencyCode, request.AmountTendered, request.Lines, ct);
             return result switch
             {
                 CreateOrderResult.Created => Results.Ok(ApiResponse<OrderDto>.Ok(order!)),
                 CreateOrderResult.ItemNotFound => Results.BadRequest(ApiResponse<object>.Fail("One or more menu items could not be found.")),
                 CreateOrderResult.UnsupportedCurrency => Results.BadRequest(ApiResponse<object>.Fail("Unsupported currency.")),
                 CreateOrderResult.InsufficientTender => Results.BadRequest(ApiResponse<object>.Fail("Amount tendered must be at least the order total.")),
-                _ => Results.BadRequest(ApiResponse<object>.Fail("Unable to complete payment."))
+                _ => Results.BadRequest(ApiResponse<object>.Fail("Unable to create order."))
             };
         })
         .RequireAuthorization("permission:pos.orders.create");
