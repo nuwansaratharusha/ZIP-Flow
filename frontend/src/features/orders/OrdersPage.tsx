@@ -159,7 +159,7 @@ export function OrdersPage() {
               )}
               <div><span>Tax</span><strong>{formatMoney(selected.tax, selected.currencySymbol)}</strong></div>
               <div className="order-total"><span>Total</span><strong>{formatMoney(selected.total, selected.currencySymbol)}</strong></div>
-              {selected.status === 'Completed' && (
+              {selected.paymentState === 'Paid' && (
                 <>
                   <div><span>Amount tendered</span><strong>{formatMoney(selected.amountTendered, selected.currencySymbol)}</strong></div>
                   <div><span>Change given</span><strong>{formatMoney(selected.changeDue, selected.currencySymbol)}</strong></div>

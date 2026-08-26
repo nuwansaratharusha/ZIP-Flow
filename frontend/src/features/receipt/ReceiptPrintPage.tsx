@@ -91,7 +91,7 @@ export function ReceiptPrintPage() {
           )}
           <div><span>Tax</span><span>{formatMoney(order.tax, order.currencySymbol)}</span></div>
           <div className="receipt-total-line"><span>Total</span><span>{formatMoney(order.total, order.currencySymbol)}</span></div>
-          {order.status === 'Completed' && (
+          {order.paymentState === 'Paid' && (
             <>
               <div><span>Tendered</span><span>{formatMoney(order.amountTendered, order.currencySymbol)}</span></div>
               <div><span>Change</span><span>{formatMoney(order.changeDue, order.currencySymbol)}</span></div>
@@ -103,7 +103,9 @@ export function ReceiptPrintPage() {
 
         <p className="receipt-meta-line">Payment: {order.paymentMethod ?? '—'}</p>
         {settings.showTaxId && settings.taxId && <p className="receipt-meta-line">VAT/Tax ID: {settings.taxId}</p>}
-        {showCollectionCode && <p className="receipt-collection-code">Collection code: {order.orderNumber}</p>}
+        {showCollectionCode && (
+          <p className="receipt-collection-code">Collection code: {order.destinationLabel ?? order.orderNumber}</p>
+        )}
 
         <p className="receipt-footer-message">{settings.footerMessage}</p>
         <p className="receipt-powered-by">Powered by ZIP Flow</p>
