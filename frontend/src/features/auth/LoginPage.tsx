@@ -49,11 +49,11 @@ export function LoginPage() {
         <div className="auth-message">
           <p className="eyebrow light">Restaurant operating platform</p>
           <h1>Every service.<br />One flow.</h1>
-          <p className="auth-lead">Fast at the counter. Calm in the kitchen. Clear in the back office.</p>
+          <p className="auth-lead">Calm on the floor. Clear in the back office.</p>
           <div className="auth-feature-row">
+            <span><i /> Tables</span>
             <span><i /> Point of sale</span>
-            <span><i /> Inventory</span>
-            <span><i /> Kitchen</span>
+            <span><i /> Orders</span>
           </div>
         </div>
 

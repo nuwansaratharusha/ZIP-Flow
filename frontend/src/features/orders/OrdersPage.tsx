@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { formatMoney } from '../../lib/currency'
-import { getOrder, getOrders, setOrderStatus } from './api'
-import { ORDER_STATUSES, type Order, type OrderStatus } from './types'
+import { getOrder, getOrders } from './api'
+import { ORDER_STATUSES, type Order } from './types'
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', month: 'short', day: '2-digit' })
 
@@ -15,7 +15,6 @@ export function OrdersPage() {
   const [status, setStatus] = useState('All')
 
   const [selected, setSelected] = useState<Order | null>(null)
-  const [statusSaving, setStatusSaving] = useState(false)
 
   const refetch = () => getOrders({ search, status }).then(setOrders)
 
@@ -42,20 +41,6 @@ export function OrdersPage() {
     }
   }
 
-  const changeStatus = async (next: OrderStatus) => {
-    if (!selected) return
-    setStatusSaving(true)
-    try {
-      const updated = await setOrderStatus(selected.id, next)
-      setSelected(updated)
-      await refetch()
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to update status.')
-    } finally {
-      setStatusSaving(false)
-    }
-  }
-
   if (loading) {
     return (
       <main className="content orders-content">
@@ -70,13 +55,13 @@ export function OrdersPage() {
         <div>
           <p className="eyebrow">Transactions</p>
           <h1>Orders</h1>
-          <p className="muted">Every order sent to the kitchen or completed at the counter.</p>
+          <p className="muted">Every order opened at a table, open or closed.</p>
         </div>
       </div>
 
       <div className="orders-toolbar">
         <input
-          placeholder="Search by order # or item"
+          placeholder="Search by order #, customer, table or item"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -90,7 +75,7 @@ export function OrdersPage() {
 
       {!loadError && orders.length === 0 && (
         <div className="section-card">
-          <p className="muted menu-empty">No orders match. Send an order to the kitchen or complete a payment from POS.</p>
+          <p className="muted menu-empty">No orders match. Open a table from the floor plan to start one.</p>
         </div>
       )}
 
@@ -100,9 +85,9 @@ export function OrdersPage() {
             <div className="menu-row menu-row-head orders-row">
               <span>Order #</span>
               <span>Time</span>
-              <span>Service</span>
+              <span>Table</span>
+              <span>Customer</span>
               <span>Items</span>
-              <span>Payment</span>
               <span>Total</span>
               <span>Status</span>
             </div>
@@ -110,9 +95,11 @@ export function OrdersPage() {
               <button className="menu-row orders-row orders-row-button" key={order.id} onClick={() => openDetail(order)}>
                 <span className="menu-item-name">#{order.orderNumber}</span>
                 <span className="muted">{timeFormat.format(new Date(order.createdAt))}</span>
-                <span>{order.serviceMode}</span>
-                <span className="muted">{order.lines.map((l) => `${l.quantity}× ${l.name}`).join(', ')}</span>
-                <span className="muted">{order.paymentMethod ?? '—'}</span>
+                <span>{order.tableName}</span>
+                <span className="muted">{order.customerName}</span>
+                <span className="muted">
+                  {order.rounds.flatMap((r) => r.lines).map((l) => `${l.quantity}× ${l.name}`).join(', ')}
+                </span>
                 <span className="menu-item-name">{formatMoney(order.total, order.currencySymbol)}</span>
                 <span><span className={`order-status-badge ${order.status.toLowerCase()}`}>{order.status}</span></span>
               </button>
@@ -127,27 +114,37 @@ export function OrdersPage() {
             <div className="sheet-header">
               <div>
                 <span className="overline">Order #{selected.orderNumber}</span>
-                <h2>{selected.serviceMode}</h2>
+                <h2>{selected.tableName}</h2>
               </div>
               <div className="sheet-header-actions">
-                <button
-                  type="button"
-                  className="pill-btn pill-btn-outline sm"
-                  onClick={() => window.open(`/print/orders/${selected.id}`, '_blank')}
-                >
-                  <Icon name="receipt" size={13} /> Print
-                </button>
+                {selected.status === 'Closed' && (
+                  <button
+                    type="button"
+                    className="pill-btn pill-btn-outline sm"
+                    onClick={() => window.open(`/print/orders/${selected.id}/bill`, '_blank')}
+                  >
+                    <Icon name="receipt" size={13} /> Reprint bill
+                  </button>
+                )}
                 <button className="icon-button" onClick={() => setSelected(null)}><Icon name="close" /></button>
               </div>
             </div>
 
-            <p className="muted order-detail-time">{timeFormat.format(new Date(selected.createdAt))}</p>
+            <p className="muted order-detail-time">
+              {selected.customerName}
+              {selected.customerPhone ? ` · ${selected.customerPhone}` : ''} · {timeFormat.format(new Date(selected.createdAt))}
+            </p>
 
             <div className="order-detail-lines">
-              {selected.lines.map((line, index) => (
-                <div className="order-detail-line" key={index}>
-                  <span>{line.quantity}× {line.name}</span>
-                  <span>{formatMoney(line.lineTotal, selected.currencySymbol)}</span>
+              {selected.rounds.map((round) => (
+                <div key={round.id}>
+                  <p className="overline">Round {round.roundNumber}</p>
+                  {round.lines.map((line, index) => (
+                    <div className="order-detail-line" key={index}>
+                      <span>{line.quantity}× {line.name}</span>
+                      <span>{formatMoney(line.lineTotal, selected.currencySymbol)}</span>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -159,24 +156,7 @@ export function OrdersPage() {
               )}
               <div><span>Tax</span><strong>{formatMoney(selected.tax, selected.currencySymbol)}</strong></div>
               <div className="order-total"><span>Total</span><strong>{formatMoney(selected.total, selected.currencySymbol)}</strong></div>
-              {selected.status === 'Completed' && (
-                <>
-                  <div><span>Amount tendered</span><strong>{formatMoney(selected.amountTendered, selected.currencySymbol)}</strong></div>
-                  <div><span>Change given</span><strong>{formatMoney(selected.changeDue, selected.currencySymbol)}</strong></div>
-                </>
-              )}
             </div>
-
-            <label className="order-detail-status-label">
-              Status
-              <select
-                value={selected.status}
-                disabled={statusSaving}
-                onChange={(e) => changeStatus(e.target.value as OrderStatus)}
-              >
-                {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </label>
           </section>
         </div>
       )}

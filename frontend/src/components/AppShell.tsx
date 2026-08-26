@@ -5,19 +5,16 @@ import { Icon, type IconName } from './Icon'
 
 const nav: { label: string; path: string; icon: IconName }[] = [
   { label: 'Overview', path: '/', icon: 'home' },
-  { label: 'POS', path: '/pos', icon: 'pos' },
   { label: 'Tables', path: '/tables', icon: 'grid' },
+  { label: 'POS', path: '/pos', icon: 'pos' },
   { label: 'Orders', path: '/orders', icon: 'orders' },
   { label: 'Menu', path: '/menu', icon: 'menu' },
-  { label: 'Inventory', path: '/inventory', icon: 'inventory' },
-  { label: 'Kitchen', path: '/kitchen', icon: 'kitchen' },
-  { label: 'Reports', path: '/reports', icon: 'reports' },
 ]
 
 export function AppShell() {
   const { session, logout } = useAuth()
   const location = useLocation()
-  const isPos = location.pathname === '/pos'
+  const isPos = location.pathname.startsWith('/pos/')
   const [time, setTime] = useState(() => new Date())
 
   useEffect(() => {

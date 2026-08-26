@@ -1,0 +1,49 @@
+/* TablesPage-only styling. Namespaced with a `tables-` prefix so nothing here
+   collides with app.css or other screens' stylesheets. */
+
+.tables-floorplan-section + .tables-floorplan-section {
+  margin-top: 22px;
+}
+
+.tables-floorplan-section-label {
+  margin: 0 0 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tables-floorplan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.tables-floorplan-card {
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.tables-floorplan-card:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.tables-floorplan-customer {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.tables-open-modal {
+  width: min(420px, 100%);
+}
+
+.tables-open-modal-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 24px;
+}

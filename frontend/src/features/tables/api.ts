@@ -1,5 +1,5 @@
 import { apiRequest, type ApiEnvelope } from '../../lib/api'
-import type { RestaurantTable, TableStatus } from './types'
+import type { RestaurantTable } from './types'
 
 export function getTables() {
   return apiRequest<ApiEnvelope<RestaurantTable[]>>('/api/tables').then((res) => res.data)
@@ -16,13 +16,6 @@ export function updateTable(id: string, name: string, section: string, capacity:
   return apiRequest<ApiEnvelope<RestaurantTable>>(`/api/tables/${id}`, {
     method: 'PUT',
     body: JSON.stringify({ name, section, capacity }),
-  }).then((res) => res.data)
-}
-
-export function setTableStatus(id: string, status: TableStatus) {
-  return apiRequest<ApiEnvelope<RestaurantTable>>(`/api/tables/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
   }).then((res) => res.data)
 }
 

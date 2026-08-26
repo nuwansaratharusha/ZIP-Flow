@@ -1,14 +1,14 @@
 import { apiRequest, type ApiEnvelope } from '../../lib/api'
-import type { Catalog, Category, MenuItem, Recipe, RecipeIngredientLine } from './types'
+import type { Catalog, Category, MenuItem } from './types'
 
 export function getCategories() {
   return apiRequest<ApiEnvelope<Category[]>>('/api/menu/categories').then((res) => res.data)
 }
 
-export function createCategory(name: string, sortOrder: number, station?: string) {
+export function createCategory(name: string, sortOrder: number) {
   return apiRequest<ApiEnvelope<Category>>('/api/menu/categories', {
     method: 'POST',
-    body: JSON.stringify({ name, sortOrder, station: station || null }),
+    body: JSON.stringify({ name, sortOrder }),
   }).then((res) => res.data)
 }
 
@@ -47,13 +47,3 @@ export function getCatalog() {
   return apiRequest<ApiEnvelope<Catalog>>('/api/menu/catalog').then((res) => res.data)
 }
 
-export function getRecipe(menuItemId: string) {
-  return apiRequest<ApiEnvelope<Recipe | null>>(`/api/menu/items/${menuItemId}/recipe`).then((res) => res.data)
-}
-
-export function saveRecipe(menuItemId: string, yieldCount: number, lines: Pick<RecipeIngredientLine, 'stockItemId' | 'quantity' | 'unit'>[]) {
-  return apiRequest<ApiEnvelope<Recipe>>(`/api/menu/items/${menuItemId}/recipe`, {
-    method: 'PUT',
-    body: JSON.stringify({ yield: yieldCount, lines }),
-  }).then((res) => res.data)
-}

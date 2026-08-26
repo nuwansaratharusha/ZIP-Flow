@@ -374,19 +374,8 @@ input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1
 .menu-category-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 20px; }
 .menu-empty { text-align: center; padding: 36px 14px; font-size: 12px; }
 
-.recipe-form { display: grid; gap: 16px; }
-.recipe-yield-label { display: grid; gap: 4px; font-size: 10px; font-weight: 700; color: #9ba3ae; }
-.recipe-yield-label input { width: 100px; }
-.recipe-lines { display: grid; gap: 8px; border-top: 1px solid #252b32; border-bottom: 1px solid #252b32; padding: 14px 0; }
-.recipe-line { display: grid; grid-template-columns: 1.2fr .7fr .6fr auto; gap: 6px; align-items: center; }
-.recipe-line select, .recipe-line input { padding: 7px 8px; font-size: 10px; }
-.recipe-add-line { margin-top: 4px; }
-.recipe-cost-preview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.recipe-cost-preview div { background: #171b21; border: 1px solid #292f37; border-radius: 9px; padding: 10px 12px; display: grid; gap: 4px; }
-.recipe-cost-preview span { font-size: 9px; color: #7f8895; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
-.recipe-cost-preview strong { font-size: 13px; color: white; }
 
-/* Orders & Kitchen */
+/* Orders */
 .orders-toolbar { display: flex; gap: 10px; margin-bottom: 16px; }
 .orders-toolbar input { max-width: 280px; }
 .orders-toolbar select { border: 1px solid #dce0e6; border-radius: 10px; padding: 0 14px; background: white; font-weight: 650; font-size: 11px; color: var(--ink); }
@@ -407,22 +396,6 @@ input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1
 .order-detail-status-label { display: grid; gap: 6px; font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .08em; color: #8e96a2; margin-top: auto; }
 .order-detail-status-label select { background: #171b21; border: 1px solid #2b323c; color: white; padding: 10px 12px; border-radius: 9px; }
 
-.kitchen-content { padding-bottom: 40px; }
-.kitchen-station-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
-.kitchen-station-tabs button { border: 1px solid var(--line); background: white; color: #6d7581; border-radius: 999px; padding: 7px 14px; font-size: 11px; font-weight: 700; }
-.kitchen-station-tabs button.active { background: var(--dark); border-color: var(--dark); color: white; }
-.kitchen-ticket-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
-.kitchen-ticket { background: white; border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 10px; }
-.kitchen-ticket-header { display: flex; justify-content: space-between; align-items: flex-start; }
-.kitchen-ticket-header strong { display: block; font-size: 15px; letter-spacing: -.02em; margin-top: 2px; }
-.kitchen-ticket-timer { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 800; color: var(--ink); letter-spacing: -.02em; }
-.kitchen-ticket-lines { display: grid; gap: 6px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
-.kitchen-ticket-line { display: grid; gap: 2px; font-size: 12px; }
-.kitchen-line-station { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; font-weight: 800; color: var(--accent); }
-.kitchen-line-note { font-size: 11px; color: #9a4646; font-style: italic; }
-.kitchen-ticket-actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
-.kitchen-ticket-actions button { border: 1px solid var(--line); background: white; color: #6d7581; border-radius: 9px; padding: 9px; font-size: 11px; font-weight: 750; }
-.kitchen-ticket-actions button:disabled { opacity: .4; }
 
 /* Settings */
 .settings-form { display: grid; gap: 16px; max-width: 480px; margin-top: 8px; }
@@ -556,8 +529,6 @@ input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1
 .icon-button:hover { color: #0f172a; border-color: #cbd5e1; }
 .payment-amount { display: grid; gap: 4px; padding: 24px 0 20px; border-bottom: 1px solid #eceef2; }
 .payment-amount strong { font-size: 34px; letter-spacing: -.04em; font-weight: 800; color: #0f172a; }
-.payment-tendered-field { padding: 16px 0 0; max-width: none; }
-.payment-tendered-field input { padding: 10px 12px; font-size: 15px; font-weight: 700; border: 1px solid #e2e8f0; border-radius: 9px; }
 .payment-change-due { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; margin-top: 12px; background: var(--success-soft); border: 1px solid #cdeedd; border-radius: 10px; font-size: 12px; font-weight: 700; color: #047857; }
 .payment-change-due strong { font-size: 16px; }
 .payment-methods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 18px 0; }
