@@ -8,6 +8,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
@@ -75,6 +76,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasIndex(x => new { x.TenantId, x.Email }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.DefaultLocation).WithMany().HasForeignKey(x => x.DefaultLocationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RefreshToken>(b =>
+        {
+            b.ToTable("RefreshToken", "iam");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.TokenHash).HasMaxLength(200).IsRequired();
+            b.Property(x => x.ReplacedByTokenHash).HasMaxLength(200);
+            b.HasIndex(x => x.TokenHash).IsUnique();
+            b.HasIndex(x => new { x.UserId, x.ExpiresAt });
+            b.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Role>(b =>
