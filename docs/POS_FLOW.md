@@ -204,3 +204,30 @@ to any free seat. No floor plan is involved, and the POS does not reference `Res
 
 Splitting orders per station · kitchen display changes · per-item food status · dine-in tabs ·
 split payments · refunds and voids from POS · reporting
+
+## 10. Previous order (proposed)
+
+**Status:** proposed, not yet implemented.
+
+**Purpose:** immediately after `Reset`, a cashier often needs the order they *just* rang up —
+to reprint a receipt, or to confirm what was charged — without leaving the charge screen to
+search the full order list.
+
+**Not this:** a lookup/search panel. That already exists on the Orders page, which lists and
+searches every order and can print any receipt. This is a shortcut to the *one* order this
+terminal most recently completed, not a history feature.
+
+**Proposed shape:**
+
+- A small strip on the order panel — order number, destination label, total — showing the
+  last order this terminal completed.
+- One action: reprint receipt (`GET /print/orders/{id}`, already used elsewhere).
+- Held in local component state only, seeded from the response of the `POST /api/orders` call
+  that completed it. Not fetched from the server on page load, and cleared on refresh — this is
+  a same-session convenience, not a durable record.
+- No void/refund action. Voids and refunds from POS are out of scope (see §9); this section
+  does not change that.
+
+Open question before building: should the strip persist across a page refresh (would need a
+`GET /api/orders?limit=1` style call), or is same-session-only sufficient for the cashier
+workflow this is meant to serve?
