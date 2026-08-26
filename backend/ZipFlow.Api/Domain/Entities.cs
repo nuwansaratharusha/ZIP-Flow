@@ -148,6 +148,9 @@ public sealed class Order : EntityBase
     public string CurrencyCode { get; set; } = string.Empty;
     public string CurrencySymbol { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1m;
+    public string BaseCurrencyCode { get; set; } = string.Empty;
+    public decimal BaseCurrencySubtotal { get; set; }
+    public decimal BaseCurrencyTotal { get; set; }
     public decimal AmountTendered { get; set; }
     public decimal ChangeDue { get; set; }
     public ICollection<OrderLine> Lines { get; set; } = new List<OrderLine>();
