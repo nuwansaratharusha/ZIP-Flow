@@ -18,12 +18,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<MenuItem> MenuItems => Set<MenuItem>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
-    public DbSet<StockItem> StockItems => Set<StockItem>();
-    public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
-    public DbSet<Recipe> Recipes => Set<Recipe>();
-    public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
+    public DbSet<OrderRound> OrderRounds => Set<OrderRound>();
     public DbSet<RestaurantTable> RestaurantTables => Set<RestaurantTable>();
-    public DbSet<CurrencyRate> CurrencyRates => Set<CurrencyRate>();
     public DbSet<OrderNumberCounter> OrderNumberCounters => Set<OrderNumberCounter>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -42,17 +38,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.VatRate).HasColumnType("decimal(9,6)");
             b.Property(x => x.ServiceChargeRate).HasColumnType("decimal(9,6)");
             b.HasIndex(x => x.Code).IsUnique();
-        });
-
-        modelBuilder.Entity<CurrencyRate>(b =>
-        {
-            b.ToTable("CurrencyRate", "organization");
-            b.HasKey(x => x.Id);
-            b.Property(x => x.Code).HasMaxLength(12).IsRequired();
-            b.Property(x => x.Symbol).HasMaxLength(8).IsRequired();
-            b.Property(x => x.Rate).HasColumnType("decimal(18,6)");
-            b.HasIndex(x => new { x.TenantId, x.Code }).IsUnique().HasFilter("\"IsArchived\" = false");
-            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Location>(b =>
@@ -142,7 +127,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.ToTable("Category", "menu");
             b.HasKey(x => x.Id);
             b.Property(x => x.Name).HasMaxLength(160).IsRequired();
-            b.Property(x => x.Station).HasMaxLength(40);
             b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -163,25 +147,25 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             b.ToTable("Order", "pos");
             b.HasKey(x => x.Id);
-            b.Property(x => x.ServiceMode).HasMaxLength(20).IsRequired();
+            b.Property(x => x.CustomerName).HasMaxLength(120).IsRequired();
+            b.Property(x => x.CustomerPhone).HasMaxLength(40);
             b.Property(x => x.Status).HasMaxLength(20).IsRequired();
-            b.Property(x => x.PaymentMethod).HasMaxLength(20);
             b.Property(x => x.Subtotal).HasColumnType("decimal(18,2)");
             b.Property(x => x.ServiceCharge).HasColumnType("decimal(18,2)");
             b.Property(x => x.Tax).HasColumnType("decimal(18,2)");
             b.Property(x => x.Total).HasColumnType("decimal(18,2)");
             b.Property(x => x.CurrencyCode).HasMaxLength(12).IsRequired();
             b.Property(x => x.CurrencySymbol).HasMaxLength(8).IsRequired();
-            b.Property(x => x.ExchangeRate).HasColumnType("decimal(18,6)");
-            b.Property(x => x.BaseCurrencyCode).HasMaxLength(12).IsRequired();
-            b.Property(x => x.BaseCurrencySubtotal).HasColumnType("decimal(18,2)");
-            b.Property(x => x.BaseCurrencyTotal).HasColumnType("decimal(18,2)");
-            b.Property(x => x.AmountTendered).HasColumnType("decimal(18,2)");
-            b.Property(x => x.ChangeDue).HasColumnType("decimal(18,2)");
             b.HasIndex(x => new { x.TenantId, x.CreatedAt });
             b.HasIndex(x => new { x.TenantId, x.OrderNumber }).IsUnique();
+            // Postgres itself refuses a second open order for the same table: a partial
+            // unique index, not an application check, so a race between two waiters
+            // opening the same table fails one insert instead of silently double-opening.
+            b.HasIndex(x => x.TableId).IsUnique().HasFilter("\"Status\" = 'Open'");
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.Table).WithMany().HasForeignKey(x => x.TableId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.OpenedByUser).WithMany().HasForeignKey(x => x.OpenedByUserId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<OrderNumberCounter>(b =>
@@ -189,6 +173,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.ToTable("OrderNumberCounter", "pos");
             b.HasKey(x => x.TenantId);
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OrderRound>(b =>
+        {
+            b.ToTable("OrderRound", "pos");
+            b.HasKey(x => x.Id);
+            // Client-supplied key, never server-generated — the double-send guard. A
+            // retried "send round" carries the same Id, so the retry's INSERT fails on
+            // the primary key and the round is recorded exactly once.
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.HasIndex(x => new { x.OrderId, x.RoundNumber }).IsUnique();
+            b.HasOne(x => x.Order).WithMany(x => x.Rounds).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<OrderLine>(b =>
@@ -200,6 +196,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.LineTotal).HasColumnType("decimal(18,2)");
             b.Property(x => x.Notes).HasMaxLength(300);
             b.HasOne(x => x.Order).WithMany(x => x.Lines).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Round).WithMany(x => x.Lines).HasForeignKey(x => x.RoundId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.MenuItem).WithMany().HasForeignKey(x => x.MenuItemId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -212,58 +209,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Status).HasMaxLength(20).IsRequired();
             b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique().HasFilter("\"IsArchived\" = false");
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
-        });
-
-        modelBuilder.Entity<StockItem>(b =>
-        {
-            b.ToTable("StockItem", "inventory");
-            b.HasKey(x => x.Id);
-            b.Property(x => x.Name).HasMaxLength(160).IsRequired();
-            b.Property(x => x.Sku).HasMaxLength(64).IsRequired();
-            b.Property(x => x.Unit).HasMaxLength(20).IsRequired();
-            b.Property(x => x.Quantity).HasColumnType("decimal(18,3)");
-            b.Property(x => x.ParLevel).HasColumnType("decimal(18,3)");
-            b.Property(x => x.ReorderLevel).HasColumnType("decimal(18,3)");
-            b.Property(x => x.Cost).HasColumnType("decimal(18,2)");
-            b.Property(x => x.RecipeUnit).HasMaxLength(20);
-            b.Property(x => x.ConversionFactor).HasColumnType("decimal(18,6)");
-            b.HasIndex(x => new { x.TenantId, x.Sku }).IsUnique();
-            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
-            // Concurrency token backed by Postgres' xmin system column (Npgsql pattern —
-            // SQL Server's [Timestamp]/rowversion has no Postgres equivalent). Guards the
-            // read-modify-write on Quantity against lost updates from concurrent orders.
-            b.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").ValueGeneratedOnAddOrUpdate().IsRowVersion();
-        });
-
-        modelBuilder.Entity<StockAdjustment>(b =>
-        {
-            b.ToTable("StockAdjustment", "inventory");
-            b.HasKey(x => x.Id);
-            b.Property(x => x.Delta).HasColumnType("decimal(18,3)");
-            b.Property(x => x.QuantityBefore).HasColumnType("decimal(18,3)");
-            b.Property(x => x.QuantityAfter).HasColumnType("decimal(18,3)");
-            b.Property(x => x.Reason).HasMaxLength(300).IsRequired();
-            b.Property(x => x.Kind).HasMaxLength(20).IsRequired();
-            b.HasIndex(x => new { x.OrderId, x.Kind });
-            b.HasOne(x => x.StockItem).WithMany(x => x.Adjustments).HasForeignKey(x => x.StockItemId).OnDelete(DeleteBehavior.Restrict);
-        });
-
-        modelBuilder.Entity<Recipe>(b =>
-        {
-            b.ToTable("Recipe", "menu");
-            b.HasKey(x => x.Id);
-            b.HasIndex(x => x.MenuItemId).IsUnique();
-            b.HasOne(x => x.MenuItem).WithMany().HasForeignKey(x => x.MenuItemId).OnDelete(DeleteBehavior.Restrict);
-        });
-
-        modelBuilder.Entity<RecipeIngredient>(b =>
-        {
-            b.ToTable("RecipeIngredient", "menu");
-            b.HasKey(x => x.Id);
-            b.Property(x => x.Quantity).HasColumnType("decimal(18,3)");
-            b.Property(x => x.Unit).HasMaxLength(20).IsRequired();
-            b.HasOne(x => x.Recipe).WithMany(x => x.Lines).HasForeignKey(x => x.RecipeId).OnDelete(DeleteBehavior.Cascade);
-            b.HasOne(x => x.StockItem).WithMany().HasForeignKey(x => x.StockItemId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

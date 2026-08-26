@@ -4,7 +4,7 @@ using ZipFlow.Api.Domain;
 
 namespace ZipFlow.Api.Services;
 
-public sealed record CategoryDto(Guid Id, string Name, int SortOrder, string? Station);
+public sealed record CategoryDto(Guid Id, string Name, int SortOrder);
 public sealed record MenuItemDto(Guid Id, Guid CategoryId, string Name, string Sku, decimal Price, bool IsAvailable, bool IsArchived);
 public sealed record CatalogDto(IReadOnlyList<CategoryDto> Categories, IReadOnlyList<MenuItemDto> Items);
 
@@ -18,7 +18,7 @@ public enum CreateMenuItemResult
 public interface IMenuService
 {
     Task<IReadOnlyList<CategoryDto>> GetCategoriesAsync(Guid tenantId, CancellationToken ct);
-    Task<CategoryDto> CreateCategoryAsync(Guid tenantId, string name, int sortOrder, string? station, CancellationToken ct);
+    Task<CategoryDto> CreateCategoryAsync(Guid tenantId, string name, int sortOrder, CancellationToken ct);
     Task<IReadOnlyList<MenuItemDto>> GetItemsAsync(Guid tenantId, CancellationToken ct);
     Task<(CreateMenuItemResult Result, MenuItemDto? Item)> CreateItemAsync(Guid tenantId, Guid categoryId, string name, string sku, decimal price, CancellationToken ct);
     Task<MenuItemDto?> UpdateItemAsync(Guid tenantId, Guid itemId, string name, decimal price, Guid categoryId, CancellationToken ct);
@@ -35,22 +35,21 @@ public sealed class MenuService(AppDbContext db) : IMenuService
             .AsNoTracking()
             .Where(x => x.TenantId == tenantId && x.IsActive)
             .OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
-            .Select(x => new CategoryDto(x.Id, x.Name, x.SortOrder, x.Station))
+            .Select(x => new CategoryDto(x.Id, x.Name, x.SortOrder))
             .ToListAsync(ct);
     }
 
-    public async Task<CategoryDto> CreateCategoryAsync(Guid tenantId, string name, int sortOrder, string? station, CancellationToken ct)
+    public async Task<CategoryDto> CreateCategoryAsync(Guid tenantId, string name, int sortOrder, CancellationToken ct)
     {
         var category = new Category
         {
             TenantId = tenantId,
             Name = name.Trim(),
-            SortOrder = sortOrder,
-            Station = string.IsNullOrWhiteSpace(station) ? null : station.Trim()
+            SortOrder = sortOrder
         };
         db.Categories.Add(category);
         await db.SaveChangesAsync(ct);
-        return new CategoryDto(category.Id, category.Name, category.SortOrder, category.Station);
+        return new CategoryDto(category.Id, category.Name, category.SortOrder);
     }
 
     public async Task<IReadOnlyList<MenuItemDto>> GetItemsAsync(Guid tenantId, CancellationToken ct)
