@@ -34,6 +34,7 @@ export function PosPage() {
   const [activeCurrency, setActiveCurrency] = useState<ActiveCurrency>({ code: 'GBP', symbol: '£', rate: 1 })
   const [vatRate, setVatRate] = useState(0)
   const [serviceChargeRate, setServiceChargeRate] = useState(0)
+  const [taxSettingsLoaded, setTaxSettingsLoaded] = useState(false)
 
   // Tables & Guests State
   const [tables, setTables] = useState<RestaurantTable[]>([])
@@ -97,6 +98,7 @@ export function PosPage() {
       .catch(() => {
         // the live preview just falls back to 0% until this loads; the backend always computes the real charge
       })
+      .finally(() => setTaxSettingsLoaded(true))
   }, [])
 
   useEffect(() => {
@@ -566,13 +568,21 @@ export function PosPage() {
           </button>
           <button
             className="pay-button"
-            disabled={!order.length}
+            disabled={!order.length || !taxSettingsLoaded}
+            title={!taxSettingsLoaded ? 'Loading tax settings…' : undefined}
             onClick={() => {
+              if (!taxSettingsLoaded) return
               setTenderedInput(amountDue.toFixed(2))
               setPaymentOpen(true)
             }}
           >
-            Pay <span>{formatMoney(total, activeCurrency.symbol)}</span>
+            {taxSettingsLoaded ? (
+              <>
+                Pay <span>{formatMoney(total, activeCurrency.symbol)}</span>
+              </>
+            ) : (
+              'Loading tax settings…'
+            )}
           </button>
         </div>
       </aside>
