@@ -1,157 +1,206 @@
-# POS Screen — Order and Payment Flow
+# POS — Architecture and System Design
 
-**Date:** 2026-08-26
-**Status:** Design agreed, not implemented
-**Scope:** The POS screen only (`frontend/src/features/pos/PosPage.tsx`). Station routing,
-the kitchen display and reporting are separate steps.
+**Scope:** The POS screen. Counter service, payment first.
+**Status:** Target design. Not yet implemented.
 
 ---
 
-## 1. The problem
+## 1. Purpose
 
-The POS screen has two buttons: **Send to kitchen** and **Pay**. They look like two steps but
-they are two alternative ways of creating an order, and nothing on the screen tells the cashier
-which to use.
+The POS screen creates paid orders. A cashier builds an order, takes payment, and the order
+becomes visible to the kitchen. There is no separate action to send an order — payment is what
+sends it.
 
-**The bug.** `OrderService` creates an order with `Status = "Sent"` from the Send button, and
-`Status = "Completed"` from the Pay button. `KitchenService.GetTicketsAsync` only returns orders
-whose status is `Sent`, `Preparing` or `Ready`. An order created by pressing Pay is therefore
-never shown to the kitchen. Take payment first and the kitchen never learns the order exists.
-
-**The cause.** `Status` is a single field being used for two unrelated things at once: whether
-the order has been paid, and how far along the food is. Marking an order paid is done by moving
-that same field to `Completed`, which removes it from the kitchen's view.
-
-**Partial credit for the existing code.** `handlePay` (`PosPage.tsx:198`) already branches: if an
-order was sent first, it completes that order; otherwise it creates a new completed one. So
-Send-then-Pay works correctly today. Only the Pay-without-Send path loses the ticket.
-
-## 2. Why two buttons is also wrong for the cashier
-
-Setting the bug aside, this is not how counter service works.
-
-- **Counter service** has one action: take payment. The order reaching the kitchen is an automatic
-  consequence, never a separate decision.
-- **Table service** has two actions, but they are an hour apart and happen on different screens.
-  The waiter builds the order and sends it; payment is initiated much later from a table or
-  open-orders view, not from the order-building screen.
-
-Putting both on one screen presents them as siblings when they are alternatives. The cashier has
-to remember a rule during a rush, and getting it wrong silently loses the ticket.
-
-## 3. The flow we are building
-
-Counter service, payment first:
-
-1. Cashier adds items to the order
-2. Cashier sets the destination — a table marker number, or nothing for takeaway
-3. Cashier presses **Charge**, takes payment
-4. Order goes to the kitchen automatically
-5. Screen shows the order number, then resets for the next customer
-
-One button. Because payment is the only path, every order reaches the kitchen.
-
-## 4. Cash payment
-
-Most of this already works. `PosPage.tsx` has an amount-tendered input, calculates change
-(`changeDue`, line 136), blocks underpayment (`tenderTooLow`, line 137), and pre-fills the exact
-amount. `AmountTendered` and `ChangeDue` are stored on the order.
-
-What is missing is usability on a tablet.
-
-**Card** — no tendered amount. Card is always the exact total, so there is no change to give. The
-field is currently shown for card payments and should not be: a cashier can type £50 tendered on
-a £12 card sale and the screen will tell them to hand over £38.
-
-**Cash** — replace the number input with an on-screen keypad:
+## 2. Flow
 
 ```
-  Amount due  £12.40          ┌───┬───┬───┐
+  ┌─────────────┐
+  │  Add items  │  tap products, adjust quantity, add notes
+  └──────┬──────┘
+         │
+  ┌──────▼──────┐
+  │ Destination │  eat-in: type marker number
+  │             │  takeaway: nothing (collection number is generated)
+  └──────┬──────┘
+         │
+  ┌──────▼──────┐
+  │   Charge    │  card: tap and done
+  │             │  cash: enter tendered, show change
+  └──────┬──────┘
+         │
+  ┌──────▼──────────────────────────────┐
+  │ POST /api/orders                     │
+  │   Status        = "Sent"             │
+  │   PaymentState  = "Paid"             │
+  │   OrderNumber   ← atomic counter     │
+  │   stock consumed via recipes         │
+  └──────┬──────────────────────────────┘
+         │
+  ┌──────▼──────┐         ┌──────────────────┐
+  │  Confirm    │         │ Kitchen display  │  filter includes "Sent",
+  │  + receipt  │         │ shows the order  │  so a paid order appears
+  └──────┬──────┘         └──────────────────┘
+         │
+  ┌──────▼──────┐
+  │    Reset    │  ready for next customer
+  └─────────────┘
+```
+
+## 3. Data model
+
+`Order` fields the POS writes:
+
+| Field | Type | Value from POS |
+|---|---|---|
+| `OrderNumber` | int | Assigned by atomic counter, per tenant |
+| `ServiceMode` | string | `Dine in`, `Takeaway`, `Delivery` |
+| `Status` | string | `Sent` — food state only |
+| `PaymentState` | string | `Paid` |
+| `DestinationLabel` | string? | Marker number, or generated collection number |
+| `PaymentMethod` | string | `Cash` or `Card` |
+| `AmountTendered` | decimal | Cash: entered. Card: equals `Total` |
+| `ChangeDue` | decimal | `AmountTendered - Total`, cash only |
+| `Subtotal` | decimal | Computed server-side from line prices |
+| `ServiceCharge` | decimal | `Subtotal × tenant.ServiceChargeRate` |
+| `Tax` | decimal | `(Subtotal + ServiceCharge) × tenant.VatRate` |
+| `Total` | decimal | `Subtotal + ServiceCharge + Tax` |
+| `CurrencyCode` / `CurrencySymbol` / `ExchangeRate` | | Active currency for the sale |
+
+`OrderLine` per item: `MenuItemId`, `Name`, `Price`, `Quantity`, `LineTotal`, `Notes`.
+Name and price are snapshots taken at order time.
+
+**`Status` and `PaymentState` are independent.** `Status` tracks food, `PaymentState` tracks
+money. Neither is derived from the other.
+
+| | Values |
+|---|---|
+| `Status` | `Sent` → `Preparing` → `Ready` |
+| `PaymentState` | `Unpaid`, `Paid`, `Refunded` |
+
+## 4. API
+
+**`POST /api/orders`** — the only order-creation endpoint.
+
+```jsonc
+// request
+{
+  "serviceMode": "Dine in",
+  "destinationLabel": "12",
+  "paymentMethod": "Cash",
+  "amountTendered": 20.00,
+  "currencyCode": "GBP",
+  "lines": [
+    { "menuItemId": "…", "quantity": 2, "notes": "no onion" }
+  ]
+}
+
+// response
+{
+  "data": {
+    "id": "…",
+    "orderNumber": 1048,
+    "destinationLabel": "12",
+    "total": 12.40,
+    "changeDue": 7.60,
+    "currencySymbol": "£"
+  }
+}
+```
+
+Server computes all money. The client's totals are display only and are never trusted.
+
+Rejects: empty order, unknown menu item, unsupported currency, tendered below total.
+
+**Loaded on mount:** `GET /api/menu/catalog`, `GET /api/settings/currencies`,
+`GET /api/settings/tax`. A failed settings call falls back to defaults rather than blocking the
+screen; the server always computes the real charge.
+
+## 5. Screen
+
+```
+┌────────────────────────────────┬──────────────────────┐
+│  Eat in │ Takeaway │ Delivery  │  Order               │
+│  ──────────────────────────    │  Marker 12           │
+│  [search]                      │──────────────────────│
+│  All │ Mains │ Sides │ Drinks  │  2× Burger    £11.00 │
+│  ──────────────────────────    │     no onion         │
+│  ┌────┐ ┌────┐ ┌────┐          │  1× Cola       £2.40 │
+│  │    │ │    │ │    │  product │                      │
+│  └────┘ └────┘ └────┘  grid    │──────────────────────│
+│  ┌────┐ ┌────┐ ┌────┐          │  Subtotal     £13.40 │
+│  │    │ │    │ │    │          │  Service       £0.00 │
+│  └────┘ └────┘ └────┘          │  VAT           £1.34 │
+│                                │  Total        £14.74 │
+│                                │  ┌────────────────┐  │
+│                                │  │ Charge  £14.74 │  │
+│                                │  └────────────────┘  │
+└────────────────────────────────┴──────────────────────┘
+```
+
+Left: service mode, search, category tabs, product grid.
+Right: destination, order lines, totals, one Charge button.
+
+**State**
+
+| State | Holds |
+|---|---|
+| `order` | Line items with quantity and notes |
+| `serviceMode` | Eat in / Takeaway / Delivery |
+| `destinationLabel` | Marker number, eat-in only |
+| `activeCurrency` | Selected currency and rate |
+| `paymentOpen` | Payment sheet visible |
+| `tendered` | Cash entry |
+| `lastOrder` | Order number and change, shown after payment |
+
+Totals are computed from `order` on each render, not stored.
+
+## 6. Payment
+
+The sheet branches on method.
+
+**Card** — one tap. No tendered field. Amount is always the total, so there is no change.
+
+**Cash** — keypad and quick-tender:
+
+```
+  Amount due  £14.74          ┌───┬───┬───┐
                               │ 1 │ 2 │ 3 │
   Tendered    £20.00          ├───┼───┼───┤
   ─────────────────           │ 4 │ 5 │ 6 │
-  Change      £7.60           ├───┼───┼───┤
+  Change       £5.26          ├───┼───┼───┤
                               │ 7 │ 8 │ 9 │
   [Exact] [£20] [£50]         ├───┼───┼───┤
                               │ 0 │ 00│ ⌫ │
                               └───┴───┴───┘
 ```
 
-The quick-tender row matters more than the keypad. Most cash sales are either the exact amount or
-a round note, so **Exact** plus the next sensible notes above the total covers most transactions
-in a single tap. The keypad handles odd amounts.
+Quick-tender offers the exact amount and the next round notes above the total. Change is
+displayed large — staff read it while counting the drawer.
 
-Change due stays large and high-contrast — staff read it while counting money, often at arm's
-length.
+Charge is blocked while tendered is below the total.
 
-## 5. Table markers
+## 7. Destination
 
-Customers take a numbered marker to any free seat and food is run out to them. The cashier types
-that number at checkout.
+| Service mode | Destination | Set by |
+|---|---|---|
+| Eat in | Marker number | Cashier types it |
+| Takeaway | Collection number | Generated at creation |
+| Delivery | Collection number | Generated at creation |
 
-This does not need a floor plan. Markers are a flat pool of numbers, not specific tables, and the
-customer has not chosen a seat when they pay.
+Markers are a flat pool of numbers on physical stands, not specific tables. The customer takes one
+to any free seat. No floor plan is involved, and the POS does not reference `RestaurantTable`.
 
-The existing table picker on the POS screen — sections, capacity, occupancy dots, add/edit/remove
-— is not used by this flow and comes off the screen. The `RestaurantTable` entity and the Tables
-feature stay in place for dine-in later.
+## 8. Rules
 
-## 6. What is currently cosmetic
+- Payment is the only way to create an order. No path reaches the kitchen without it.
+- The server computes every money value. Client totals are display only.
+- Line name and price are snapshotted, so later menu edits do not alter past orders.
+- Order numbers come from a per-tenant atomic counter — two terminals cannot collide.
+- Stock is consumed from recipes at order creation.
+- An order cannot be edited after payment. Extra items are a new order.
+- Cash tendered below the total is rejected client-side and server-side.
 
-Parts of the POS screen look finished but are not connected to anything. Listed so they are not
-mistaken for working features:
+## 9. Not in this scope
 
-| Item | State |
-|---|---|
-| `Order #1048`, `Alex Morgan` (line 459) | Hardcoded strings. The real order number is never shown. |
-| `selectedTable` | Never sent to the backend. `Order` has no table column. |
-| `guestCount` (defaults to 3) | Never sent anywhere. Dead state. |
-| Table status: available / occupied / reserved | Rendered with dots, badges and a legend, but nothing ever writes the field. |
-| Split payment button | Present and permanently disabled. |
-
-## 7. Changes
-
-### Backend
-
-- Add `Order.PaymentState` — `Unpaid`, `Paid`, `Refunded`. Migration backfills existing
-  `Completed` orders to `Paid`.
-- `Status` becomes food-only. The Charge path sets `Status = "Sent"` and `PaymentState = "Paid"`.
-- **`KitchenService` needs no change.** Its existing filter already includes `Sent`, so a paid
-  order now appears. One new field fixes the bug.
-- Add `Order.DestinationLabel` (nullable string) — the marker number for eat-in, or a generated
-  collection number for takeaway. `ServiceMode` distinguishes which.
-- Remove the create-unpaid-order path from the API surface.
-
-### Frontend (`PosPage.tsx`)
-
-- Delete the Send to kitchen button, `handleSendToKitchen`, `sending`, and the `locked` freeze
-- Single **Charge** button
-- Payment sheet split by method: card takes no tendered amount, cash gets the keypad and
-  quick-tender row
-- Marker number input, shown for eat-in only, replacing the table picker modal
-- Delete `guestCount` and the hardcoded order number and staff name
-- After payment, show the real order number and destination, then reset
-
-## 8. Out of scope
-
-| Deferred | Why |
-|---|---|
-| Splitting orders per station | Needs a station entity first. Next step. |
-| Kitchen display changes | Unaffected — its filter already works once payment is a separate field. |
-| Per-item food status | Bar and kitchen tracking their own items independently. Later step. |
-| Dine-in tabs | Long-running unpaid orders, adding items over time, paying at the end. |
-| Split payments | Multiple payment methods on one order. Button already exists, disabled. |
-| Reporting | Separate step. |
-
-## 9. Open points
-
-- **Removing the unpaid path** takes away the only way to send an order without payment. Correct
-  for counter service; dine-in will add it back deliberately. Confirm no venue currently relies on
-  Send-then-Pay before removing it.
-- **VAT and service mode.** In the UK, eat-in and hot takeaway are taxed differently from cold
-  takeaway. The system has one VAT rate per tenant, so service mode arguably ought to affect tax.
-  Not addressed here.
-- **Adding to an existing order.** At a counter this is a second order linked to the first, not a
-  reopened one. Not implemented; recorded so it is not built the wrong way later.
-- **A single payment method per order.** `PaymentMethod` is one string. Part-cash-part-card is
-  common and will need a payments table eventually.
+Splitting orders per station · kitchen display changes · per-item food status · dine-in tabs ·
+split payments · refunds and voids from POS · reporting
