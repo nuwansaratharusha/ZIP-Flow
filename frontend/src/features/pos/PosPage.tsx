@@ -3,13 +3,14 @@ import { Icon } from '../../components/Icon'
 import { formatMoney } from '../../lib/currency'
 import { getCatalog } from '../menu/api'
 import type { Category, MenuItem } from '../menu/types'
-import { completeOrder, createCompletedOrder, sendToKitchen } from '../orders/api'
+import { createOrder } from '../orders/api'
 import { getCurrencies, getTaxSettings } from '../settings/api'
-import { archiveTable, createTable, getTables, updateTable } from '../tables/api'
-import { TABLE_SECTIONS, type RestaurantTable } from '../tables/types'
 
 type OrderLine = MenuItem & { quantity: number; notes?: string }
 type ActiveCurrency = { code: string; symbol: string; rate: number }
+type LastOrder = { id: string; orderNumber: number; destinationLabel: string | null; isDineIn: boolean; changeDue: number; currencySymbol: string }
+
+const STANDARD_NOTES = [5, 10, 20, 50, 100]
 
 function monogram(name: string) {
   const words = name.trim().split(/\s+/)
@@ -27,8 +28,8 @@ export function PosPage() {
   const [category, setCategory] = useState('all')
   const [serviceMode, setServiceMode] = useState<'Dine in' | 'Takeaway' | 'Delivery'>('Dine in')
   const [search, setSearch] = useState('')
-  const [paymentOpen, setPaymentOpen] = useState(false)
   const [order, setOrder] = useState<OrderLine[]>([])
+  const [destinationLabel, setDestinationLabel] = useState('')
 
   const [currencies, setCurrencies] = useState<ActiveCurrency[]>([])
   const [activeCurrency, setActiveCurrency] = useState<ActiveCurrency | null>(null)
@@ -38,56 +39,18 @@ export function PosPage() {
   const [serviceChargeRate, setServiceChargeRate] = useState(0)
   const [taxSettingsLoaded, setTaxSettingsLoaded] = useState(false)
 
-  // Tables & Guests State
-  const [tables, setTables] = useState<RestaurantTable[]>([])
-  const [selectedTable, setSelectedTable] = useState<RestaurantTable | null>(null)
-  const [tableModalOpen, setTableModalOpen] = useState(false)
-  const [tableSectionFilter, setTableSectionFilter] = useState('all')
-  const [newTableFormOpen, setNewTableFormOpen] = useState(false)
-  const [newTableName, setNewTableName] = useState('')
-  const [newTableSection, setNewTableSection] = useState<string>(TABLE_SECTIONS[0])
-  const [newTableCapacity, setNewTableCapacity] = useState(4)
-  const [newTableError, setNewTableError] = useState('')
-  const [savingTable, setSavingTable] = useState(false)
-  const [editingTableId, setEditingTableId] = useState<string | null>(null)
-  const [tablesLoadError, setTablesLoadError] = useState('')
-  const [tablesLoading, setTablesLoading] = useState(false)
-
-  const [guestCount, setGuestCount] = useState(3)
-  const [guestPickerOpen, setGuestPickerOpen] = useState(false)
-
-  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null)
-  // Client-generated id for the in-flight "send to kitchen" call. Kept stable across
-  // retries (e.g. after a timeout/dropped connection) so the server can recognize a
-  // retry as the same order instead of creating a duplicate.
-  const pendingOrderIdRef = useRef<string | null>(null)
-  const [sending, setSending] = useState(false)
+  const [paymentOpen, setPaymentOpen] = useState(false)
+  const [paymentStep, setPaymentStep] = useState<'method' | 'cash'>('method')
+  const [tenderedCents, setTenderedCents] = useState(0)
   const [paying, setPaying] = useState(false)
-  const [tenderedInput, setTenderedInput] = useState('')
   const [actionError, setActionError] = useState('')
   const [confirmation, setConfirmation] = useState('')
-  const [lastPrintableOrderId, setLastPrintableOrderId] = useState<string | null>(null)
+  const [lastOrder, setLastOrder] = useState<LastOrder | null>(null)
 
-  const locked = currentOrderId !== null
-
-  const loadTables = (attempt = 1) => {
-    setTablesLoading(true)
-    setTablesLoadError('')
-    getTables()
-      .then((fetched) => {
-        setTables(fetched)
-        setSelectedTable((current) => current ?? fetched[0] ?? null)
-        setTablesLoading(false)
-      })
-      .catch((err) => {
-        if (attempt < 3) {
-          window.setTimeout(() => loadTables(attempt + 1), attempt * 1000)
-          return
-        }
-        setTablesLoading(false)
-        setTablesLoadError(err instanceof Error ? err.message : 'Failed to load tables.')
-      })
-  }
+  // Client-generated id for the in-flight charge call. Kept stable across retries (e.g.
+  // after a timeout/dropped connection) so the server can recognize a retry as the same
+  // order instead of creating a duplicate.
+  const pendingOrderIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     getCatalog()
@@ -97,8 +60,6 @@ export function PosPage() {
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load the menu.'))
       .finally(() => setLoading(false))
-
-    loadTables()
 
     getCurrencies()
       .then((settings) => {
@@ -140,16 +101,6 @@ export function PosPage() {
     })
   }, [products, category, search])
 
-  const tableSections = useMemo(() => {
-    const set = new Set(tables.map((t) => t.section))
-    return ['all', ...Array.from(set)]
-  }, [tables])
-
-  const visibleTables = useMemo(() => {
-    if (tableSectionFilter === 'all') return tables
-    return tables.filter((t) => t.section === tableSectionFilter)
-  }, [tables, tableSectionFilter])
-
   // Round-half-away-from-zero to 2dp, matching backend's
   // Math.Round(x, 2, MidpointRounding.AwayFromZero) (OrderService.cs).
   // JS's Math.round already rounds .5 up toward +Infinity, which is
@@ -176,12 +127,16 @@ export function PosPage() {
   const tax = round2((convertedSubtotal + serviceCharge) * vatRate)
   const total = convertedSubtotal + serviceCharge + tax
   const amountDue = total
-  const tenderedValue = Number(tenderedInput) || 0
+  const tenderedValue = tenderedCents / 100
   const changeDue = Math.max(0, tenderedValue - amountDue)
-  const tenderTooLow = tenderedInput !== '' && tenderedValue < amountDue
+  const tenderTooLow = tenderedValue < amountDue
+
+  const quickNotes = useMemo(
+    () => STANDARD_NOTES.filter((note) => note > amountDue).slice(0, 2),
+    [amountDue]
+  )
 
   const addProduct = (product: MenuItem) => {
-    if (locked) return
     setOrder((current) => {
       const existing = current.find((line) => line.id === product.id)
       if (existing) {
@@ -192,7 +147,6 @@ export function PosPage() {
   }
 
   const changeQuantity = (id: string, delta: number) => {
-    if (locked) return
     setOrder((current) =>
       current
         .map((line) => (line.id === id ? { ...line, quantity: line.quantity + delta } : line))
@@ -201,135 +155,77 @@ export function PosPage() {
   }
 
   const removeLine = (id: string) => {
-    if (locked) return
     setOrder((current) => current.filter((item) => item.id !== id))
   }
 
   const updateNotes = (id: string, notes: string) => {
-    if (locked) return
     setOrder((current) => current.map((line) => (line.id === id ? { ...line, notes } : line)))
   }
 
-  const resetOrder = () => {
-    setOrder([])
-    setCurrentOrderId(null)
-    pendingOrderIdRef.current = null
+  const openPaymentSheet = () => {
+    if (!taxSettingsLoaded) return
+    setActionError('')
+    setPaymentStep('method')
+    setTenderedCents(0)
+    setPaymentOpen(true)
   }
 
-  const handleSendToKitchen = async () => {
+  const handleKeypadKey = (key: string) => {
+    if (key === '⌫') {
+      setTenderedCents((cents) => Math.floor(cents / 10))
+      return
+    }
+    setTenderedCents((cents) => {
+      const digits = key === '00' ? '00' : key
+      const next = Number(`${cents}${digits}`)
+      // Cap the keypad entry at a sane amount (100,000 in the active currency's minor unit)
+      // so a mistaken run of digits can't produce an absurd tendered value.
+      return Number.isFinite(next) && next < 100_000_00 ? next : cents
+    })
+  }
+
+  const handleCharge = async (method: 'Cash' | 'Card') => {
     if (!activeCurrency) return
+    if (method === 'Cash' && tenderTooLow) return
     setActionError('')
-    setLastPrintableOrderId(null)
-    setSending(true)
-    // Reuse the same client-generated id across retries of this order so a dropped
-    // connection followed by a retry can't create a duplicate order server-side.
+    setPaying(true)
     if (!pendingOrderIdRef.current) {
       pendingOrderIdRef.current = crypto.randomUUID()
     }
     try {
-      const created = await sendToKitchen(
+      const created = await createOrder(
         serviceMode,
+        method,
         order.map((line) => ({ menuItemId: line.id, quantity: line.quantity, notes: line.notes })),
-        activeCurrency.code,
-        pendingOrderIdRef.current
+        {
+          destinationLabel: serviceMode === 'Dine in' ? destinationLabel.trim() : undefined,
+          currencyCode: activeCurrency.code,
+          amountTendered: method === 'Cash' ? tenderedValue : undefined,
+          id: pendingOrderIdRef.current,
+        }
       )
       pendingOrderIdRef.current = null
-      setCurrentOrderId(created.id)
-      setConfirmation('Sent to kitchen.')
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to send order to kitchen.')
-    } finally {
-      setSending(false)
-    }
-  }
-
-  const handlePay = async (method: 'Cash' | 'Card') => {
-    if (tenderTooLow || !activeCurrency) return
-    setActionError('')
-    setPaying(true)
-    try {
-      const completed = currentOrderId
-        ? await completeOrder(currentOrderId, method, tenderedValue || amountDue)
-        : await createCompletedOrder(
-            serviceMode,
-            method,
-            order.map((line) => ({ menuItemId: line.id, quantity: line.quantity, notes: line.notes })),
-            activeCurrency.code,
-            tenderedValue || amountDue
-          )
       setPaymentOpen(false)
-      resetOrder()
-      setTenderedInput('')
-      setLastPrintableOrderId(completed.id)
+      setOrder([])
+      setDestinationLabel('')
+      setTenderedCents(0)
+      setLastOrder({
+        id: created.id,
+        orderNumber: created.orderNumber,
+        destinationLabel: created.destinationLabel,
+        isDineIn: created.serviceMode === 'Dine in',
+        changeDue: created.changeDue,
+        currencySymbol: created.currencySymbol,
+      })
       setConfirmation(
-        completed.changeDue > 0
-          ? `Payment completed (${method}). Change due: ${formatMoney(completed.changeDue, completed.currencySymbol)}.`
+        created.changeDue > 0
+          ? `Payment completed (${method}). Change due: ${formatMoney(created.changeDue, created.currencySymbol)}.`
           : `Payment completed (${method}).`
       )
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to complete payment.')
     } finally {
       setPaying(false)
-    }
-  }
-
-  const handleAddTable = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setNewTableError('')
-    setLastPrintableOrderId(null)
-    if (!newTableName.trim()) return
-
-    setSavingTable(true)
-    try {
-      if (editingTableId) {
-        const updated = await updateTable(editingTableId, newTableName.trim(), newTableSection, Number(newTableCapacity) || 4)
-        setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-        setSelectedTable((prev) => (prev?.id === updated.id ? updated : prev))
-        setConfirmation(`Updated ${updated.name}`)
-      } else {
-        const created = await createTable(newTableName.trim(), newTableSection, Number(newTableCapacity) || 4)
-        setTables((prev) => [...prev, created])
-        setSelectedTable(created)
-        setConfirmation(`Created and selected ${created.name}`)
-      }
-      setEditingTableId(null)
-      setNewTableName('')
-      setNewTableFormOpen(false)
-      setTableModalOpen(false)
-    } catch (err) {
-      setNewTableError(err instanceof Error ? err.message : 'Failed to save table.')
-    } finally {
-      setSavingTable(false)
-    }
-  }
-
-  const startEditTable = (tbl: RestaurantTable, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setEditingTableId(tbl.id)
-    setNewTableName(tbl.name)
-    setNewTableSection(tbl.section)
-    setNewTableCapacity(tbl.capacity)
-    setNewTableError('')
-    setNewTableFormOpen(true)
-  }
-
-  const cancelTableForm = () => {
-    setEditingTableId(null)
-    setNewTableName('')
-    setNewTableError('')
-    setNewTableFormOpen(false)
-  }
-
-  const handleArchiveTable = async (tbl: RestaurantTable, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setLastPrintableOrderId(null)
-    try {
-      await archiveTable(tbl.id)
-      setTables((prev) => prev.filter((t) => t.id !== tbl.id))
-      setSelectedTable((prev) => (prev?.id === tbl.id ? null : prev))
-      setConfirmation(`Removed ${tbl.name}`)
-    } catch (err) {
-      setNewTableError(err instanceof Error ? err.message : 'Failed to remove table.')
     }
   }
 
@@ -366,7 +262,6 @@ export function PosPage() {
               <Icon name="cash" size={14} />
               <select
                 value={activeCurrency.code}
-                disabled={locked}
                 onChange={(e) => {
                   const next = currencies.find((c) => c.code === e.target.value)
                   if (next) setActiveCurrency(next)
@@ -414,7 +309,7 @@ export function PosPage() {
 
         <div className="product-grid">
           {visibleProducts.map((product) => (
-            <button className="product-tile" key={product.id} onClick={() => addProduct(product)} disabled={locked}>
+            <button className="product-tile" key={product.id} onClick={() => addProduct(product)}>
               <span className="product-monogram">{monogram(product.name)}</span>
               <span className="product-copy">
                 <strong>{product.name}</strong>
@@ -433,123 +328,50 @@ export function PosPage() {
         <div className="order-header">
           <div>
             <span className="overline">Current order</span>
-            {serviceMode === 'Dine in' ? (
-              <button
-                type="button"
-                className="pos-table-selector-btn"
-                onClick={() => setTableModalOpen(true)}
-                title="Change Table"
-              >
-                <h1>{selectedTable?.name ?? 'Select table'}</h1>
-                <span className="table-change-badge">Change</span>
-              </button>
-            ) : (
-              <h1>{serviceMode}</h1>
-            )}
-            {tablesLoadError && (
-              <div className="alert error pos-tables-load-error">
-                <span>{tablesLoadError}</span>
-                <button type="button" className="pill-btn pill-btn-outline sm" onClick={() => loadTables()} disabled={tablesLoading}>
-                  {tablesLoading ? 'Retrying…' : 'Retry'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="order-header-right">
-            {locked ? (
-              <span className="quiet-pill order-sent-pill">Sent to kitchen</span>
-            ) : (
-              <div className="guest-selector-container">
-                <button
-                  type="button"
-                  className="order-meta guest-chip-btn"
-                  onClick={() => setGuestPickerOpen((prev) => !prev)}
-                >
-                  <Icon name="user" size={13} />
-                  <span>
-                    {guestCount} {guestCount === 1 ? 'guest' : 'guests'}
-                  </span>
-                  <Icon name="chevronDown" size={12} />
-                </button>
-
-                {guestPickerOpen && (
-                  <div className="guest-dropdown-popover">
-                    <div className="guest-popover-header">
-                      <strong>Select Guests</strong>
-                      <button
-                        type="button"
-                        className="guest-popover-close"
-                        onClick={() => setGuestPickerOpen(false)}
-                      >
-                        <Icon name="close" size={12} />
-                      </button>
-                    </div>
-
-                    <div className="guest-quick-grid">
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 10, 12].map((num) => (
-                        <button
-                          key={num}
-                          type="button"
-                          className={`guest-quick-num ${guestCount === num ? 'active' : ''}`}
-                          onClick={() => {
-                            setGuestCount(num)
-                            setGuestPickerOpen(false)
-                          }}
-                        >
-                          {num}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="guest-stepper-row">
-                      <span>Custom count</span>
-                      <div className="guest-stepper-controls">
-                        <button
-                          type="button"
-                          onClick={() => setGuestCount((g) => Math.max(1, g - 1))}
-                          disabled={guestCount <= 1}
-                        >
-                          <Icon name="minus" size={12} />
-                        </button>
-                        <strong>{guestCount}</strong>
-                        <button
-                          type="button"
-                          onClick={() => setGuestCount((g) => g + 1)}
-                        >
-                          <Icon name="plus" size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+            <h1>{serviceMode}</h1>
           </div>
         </div>
 
-        <div className="order-context">
-          <span>Order #1048</span>
-          <span>Alex Morgan</span>
-          {serviceMode === 'Dine in' && selectedTable && <span className="order-context-section">{selectedTable.section}</span>}
-        </div>
+        {serviceMode === 'Dine in' && (
+          <div className="marker-field">
+            <label htmlFor="marker-number">Marker number</label>
+            <input
+              id="marker-number"
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 12"
+              value={destinationLabel}
+              onChange={(e) => setDestinationLabel(e.target.value)}
+            />
+          </div>
+        )}
 
         <div className="order-lines">
           {confirmation && (
             <div className="alert success pos-confirmation">
-              <span>{confirmation}</span>
-              {lastPrintableOrderId && (
+              <div className="last-order-banner">
+                <span>{confirmation}</span>
+                {lastOrder && (
+                  <strong>
+                    Order #{lastOrder.orderNumber}
+                    {lastOrder.destinationLabel
+                      ? ` · ${lastOrder.isDineIn ? 'Marker' : 'Collection'} ${lastOrder.destinationLabel}`
+                      : ''}
+                  </strong>
+                )}
+              </div>
+              {lastOrder && (
                 <button
                   type="button"
                   className="pos-print-receipt-btn"
-                  onClick={() => window.open(`/print/orders/${lastPrintableOrderId}`, '_blank')}
+                  onClick={() => window.open(`/print/orders/${lastOrder.id}`, '_blank')}
                 >
                   <Icon name="receipt" size={13} /> Print receipt
                 </button>
               )}
             </div>
           )}
-          {actionError && <div className="alert error pos-confirmation">{actionError}</div>}
+          {actionError && !paymentOpen && <div className="alert error pos-confirmation">{actionError}</div>}
 
           {order.length === 0 && (
             <div className="empty-order">
@@ -562,7 +384,7 @@ export function PosPage() {
           )}
 
           {order.map((line) => (
-            <article className={`order-line ${locked ? 'locked' : ''}`} key={line.id}>
+            <article className="order-line" key={line.id}>
               <div className="order-line-main">
                 <span className="line-qty">{line.quantity}×</span>
                 <div>
@@ -573,7 +395,6 @@ export function PosPage() {
               <div className="line-actions">
                 <button
                   onClick={() => changeQuantity(line.id, -1)}
-                  disabled={locked}
                   aria-label={`Remove one ${line.name}`}
                 >
                   <Icon name="minus" />
@@ -581,7 +402,6 @@ export function PosPage() {
                 <span>{line.quantity}</span>
                 <button
                   onClick={() => changeQuantity(line.id, 1)}
-                  disabled={locked}
                   aria-label={`Add one ${line.name}`}
                 >
                   <Icon name="plus" />
@@ -589,21 +409,17 @@ export function PosPage() {
                 <button
                   className="line-delete"
                   onClick={() => removeLine(line.id)}
-                  disabled={locked}
                   aria-label={`Delete ${line.name}`}
                 >
                   <Icon name="trash" />
                 </button>
               </div>
-              {!locked && (
-                <input
-                  className="line-note-input"
-                  placeholder="Add a note (e.g. no onion)"
-                  value={line.notes ?? ''}
-                  onChange={(e) => updateNotes(line.id, e.target.value)}
-                />
-              )}
-              {locked && line.notes && <p className="line-note-readonly">{line.notes}</p>}
+              <input
+                className="line-note-input"
+                placeholder="Add a note (e.g. no onion)"
+                value={line.notes ?? ''}
+                onChange={(e) => updateNotes(line.id, e.target.value)}
+              />
             </article>
           ))}
         </div>
@@ -631,26 +447,18 @@ export function PosPage() {
 
         <div className="order-actions">
           <button
-            className="send-button"
-            disabled={!order.length || locked || sending || !currencyReady}
-            onClick={handleSendToKitchen}
+            className="charge-button"
+            disabled={
+              !order.length ||
+              !currencyReady ||
+              (serviceMode === 'Dine in' && !destinationLabel.trim())
+            }
             title={!currencyReady ? 'Waiting for currency settings to load…' : undefined}
-          >
-            {locked ? 'Sent to kitchen' : sending ? 'Sending…' : !currencyReady ? 'Loading currency…' : 'Send to kitchen'}
-          </button>
-          <button
-            className="pay-button"
-            disabled={!order.length || !currencyReady}
-            title={!currencyReady ? 'Waiting for currency settings to load…' : undefined}
-            onClick={() => {
-              if (!taxSettingsLoaded) return
-              setTenderedInput(amountDue.toFixed(2))
-              setPaymentOpen(true)
-            }}
+            onClick={openPaymentSheet}
           >
             {currencyReady ? (
               <>
-                Pay <span>{formatMoney(total, currencySymbol)}</span>
+                Charge <span>{formatMoney(total, currencySymbol)}</span>
               </>
             ) : (
               'Loading currency…'
@@ -659,177 +467,6 @@ export function PosPage() {
         </div>
       </aside>
 
-      {/* Table Selector Modal */}
-      {tableModalOpen && (
-        <div className="modal-backdrop" onClick={() => setTableModalOpen(false)}>
-          <div className="modal-card table-selector-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-title-group">
-                <h3>Select Table &amp; Seating</h3>
-                <p className="text-muted">Choose an active dining table or add a new table to your floor plan.</p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button
-                  type="button"
-                  className="pill-btn pill-btn-primary sm"
-                  onClick={() => (newTableFormOpen ? cancelTableForm() : setNewTableFormOpen(true))}
-                >
-                  <Icon name="plus" size={13} />
-                  <span>{newTableFormOpen ? 'Close Form' : 'Add Table'}</span>
-                </button>
-                <button type="button" className="close-btn" onClick={() => setTableModalOpen(false)}>
-                  <Icon name="close" size={16} />
-                </button>
-              </div>
-            </div>
-
-            {newTableError && !newTableFormOpen && <div className="alert error table-modal-error">{newTableError}</div>}
-
-            {tablesLoadError && (
-              <div className="alert error table-modal-error">
-                <span>{tablesLoadError}</span>
-                <button type="button" className="pill-btn pill-btn-outline sm" onClick={() => loadTables()} disabled={tablesLoading}>
-                  {tablesLoading ? 'Retrying…' : 'Retry'}
-                </button>
-              </div>
-            )}
-
-            {/* Add/Edit Table Form Dropdown Drawer */}
-            {newTableFormOpen && (
-              <form onSubmit={handleAddTable} className="new-table-drawer">
-                <p className="new-table-drawer-title">{editingTableId ? 'Edit table' : 'New table'}</p>
-                <div className="new-table-form-row">
-                  <div className="form-input-group">
-                    <label>Table Name</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Table 15, Patio 04"
-                      value={newTableName}
-                      onChange={(e) => setNewTableName(e.target.value)}
-                      required
-                      autoFocus
-                    />
-                  </div>
-
-                  <div className="form-input-group">
-                    <label>Section</label>
-                    <select
-                      value={newTableSection}
-                      onChange={(e) => setNewTableSection(e.target.value)}
-                    >
-                      {TABLE_SECTIONS.map((sec) => <option key={sec} value={sec}>{sec}</option>)}
-                    </select>
-                  </div>
-
-                  <div className="form-input-group" style={{ width: '90px' }}>
-                    <label>Capacity</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="30"
-                      value={newTableCapacity}
-                      onChange={(e) => setNewTableCapacity(Number(e.target.value))}
-                    />
-                  </div>
-
-                  <button type="submit" className="pill-btn pill-btn-primary sm" disabled={savingTable} style={{ alignSelf: 'flex-end', height: '38px' }}>
-                    {savingTable ? 'Saving…' : editingTableId ? 'Save Changes' : 'Create Table'}
-                  </button>
-                </div>
-                {newTableError && <div className="alert error">{newTableError}</div>}
-              </form>
-            )}
-
-            {/* Section Filter Tabs */}
-            <div className="table-section-tabs">
-              {tableSections.map((sec) => (
-                <button
-                  key={sec}
-                  type="button"
-                  className={`table-sec-pill ${tableSectionFilter === sec ? 'active' : ''}`}
-                  onClick={() => setTableSectionFilter(sec)}
-                >
-                  {sec === 'all' ? 'All Sections' : sec}
-                </button>
-              ))}
-            </div>
-
-            {/* Tables Grid */}
-            <div className="tables-selection-grid">
-              {visibleTables.map((tbl) => {
-                const isSelected = selectedTable?.id === tbl.id
-                return (
-                  <div
-                    key={tbl.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`pos-table-card ${isSelected ? 'selected' : ''} status-${tbl.status}`}
-                    onClick={() => {
-                      setSelectedTable(tbl)
-                      setTableModalOpen(false)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        setSelectedTable(tbl)
-                        setTableModalOpen(false)
-                      }
-                    }}
-                  >
-                    <div className="table-card-top">
-                      <strong>{tbl.name}</strong>
-                      <span className={`table-status-dot ${tbl.status}`} />
-                    </div>
-
-                    <div className="table-card-middle">
-                      <span className="table-section-label">{tbl.section}</span>
-                    </div>
-
-                    <div className="table-card-bottom">
-                      <span className="table-capacity-chip">
-                        <Icon name="user" size={11} /> {tbl.capacity} seats
-                      </span>
-                      <span className={`table-status-badge ${tbl.status}`}>
-                        {tbl.status}
-                      </span>
-                    </div>
-
-                    <div className="table-card-actions">
-                      <button type="button" title="Edit table" onClick={(e) => startEditTable(tbl, e)}>
-                        <Icon name="edit" size={12} />
-                      </button>
-                      <button type="button" title="Remove table" onClick={(e) => handleArchiveTable(tbl, e)}>
-                        <Icon name="trash" size={12} />
-                      </button>
-                    </div>
-
-                    {isSelected && (
-                      <span className="table-selected-check">
-                        <Icon name="check" size={12} />
-                      </span>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className="table-modal-footer">
-              <div className="table-legend">
-                <span className="legend-chip"><i className="dot available" /> Available</span>
-                <span className="legend-chip"><i className="dot occupied" /> Occupied</span>
-                <span className="legend-chip"><i className="dot reserved" /> Reserved</span>
-              </div>
-              <button
-                type="button"
-                className="pill-btn pill-btn-outline sm"
-                onClick={() => setTableModalOpen(false)}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Payment Sheet */}
       {paymentOpen && (
         <div className="sheet-backdrop" onMouseDown={() => setPaymentOpen(false)}>
@@ -837,7 +474,7 @@ export function PosPage() {
             <div className="sheet-header">
               <div>
                 <span className="overline">Checkout</span>
-                <h2>Choose payment method</h2>
+                <h2>{paymentStep === 'method' ? 'Choose payment method' : 'Cash payment'}</h2>
               </div>
               <button className="icon-button" onClick={() => setPaymentOpen(false)}>
                 <Icon name="close" />
@@ -849,57 +486,79 @@ export function PosPage() {
               <strong>{formatMoney(amountDue, currencySymbol)}</strong>
             </div>
 
-            <label className="settings-field payment-tendered-field">
-              Amount tendered
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={tenderedInput}
-                onChange={(e) => setTenderedInput(e.target.value)}
-              />
-            </label>
+            {actionError && <div className="alert error">{actionError}</div>}
 
-            {tenderTooLow && (
-              <div className="alert error">Amount tendered is less than the amount due.</div>
-            )}
-            {!tenderTooLow && changeDue > 0 && (
-              <div className="payment-change-due">
-                <span>Change due</span>
-                <strong>{formatMoney(changeDue, currencySymbol)}</strong>
+            {paymentStep === 'method' && (
+              <div className="payment-methods">
+                <button disabled={paying} onClick={() => handleCharge('Card')}>
+                  <span className="payment-icon">
+                    <Icon name="card" />
+                  </span>
+                  <strong>Card</strong>
+                  <small>Terminal payment</small>
+                </button>
+                <button
+                  disabled={paying}
+                  onClick={() => {
+                    setTenderedCents(0)
+                    setPaymentStep('cash')
+                  }}
+                >
+                  <span className="payment-icon">
+                    <Icon name="cash" />
+                  </span>
+                  <strong>Cash</strong>
+                  <small>Cash drawer</small>
+                </button>
               </div>
             )}
 
-            {actionError && <div className="alert error">{actionError}</div>}
+            {paymentStep === 'cash' && (
+              <>
+                <button type="button" className="cash-entry-back" onClick={() => setPaymentStep('method')}>
+                  <Icon name="arrowLeft" size={12} /> Back
+                </button>
 
-            <div className="payment-methods">
-              <button disabled={paying || tenderTooLow} onClick={() => handlePay('Card')}>
-                <span className="payment-icon">
-                  <Icon name="card" />
-                </span>
-                <strong>Card</strong>
-                <small>Terminal payment</small>
-              </button>
-              <button disabled={paying || tenderTooLow} onClick={() => handlePay('Cash')}>
-                <span className="payment-icon">
-                  <Icon name="cash" />
-                </span>
-                <strong>Cash</strong>
-                <small>Cash drawer</small>
-              </button>
-              <button disabled>
-                <span className="payment-icon">
-                  <Icon name="split" />
-                </span>
-                <strong>Split</strong>
-                <small>Split the bill</small>
-              </button>
-            </div>
+                <div className="cash-entry-rows">
+                  <div className="cash-entry-row tendered">
+                    <span>Tendered</span>
+                    <strong>{formatMoney(tenderedValue, currencySymbol)}</strong>
+                  </div>
+                  <div className="cash-entry-row change">
+                    <span>Change</span>
+                    <strong>{formatMoney(changeDue, currencySymbol)}</strong>
+                  </div>
+                </div>
 
-            <div className="sheet-note">
-              <Icon name="spark" />
-              <span>This is the UI foundation. Real payment processing is added in the Payments step.</span>
-            </div>
+                <div className="quick-tender-row">
+                  <button type="button" onClick={() => setTenderedCents(Math.round(amountDue * 100))}>
+                    Exact
+                  </button>
+                  {quickNotes.map((note) => (
+                    <button type="button" key={note} onClick={() => setTenderedCents(Math.round(note * 100))}>
+                      {formatMoney(note, currencySymbol)}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="keypad-grid">
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '00', '⌫'].map((key) => (
+                    <button type="button" key={key} onClick={() => handleKeypadKey(key)}>
+                      {key}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  className="keypad-charge-button"
+                  disabled={paying || tenderTooLow}
+                  onClick={() => handleCharge('Cash')}
+                >
+                  {paying ? 'Charging…' : `Charge ${formatMoney(amountDue, currencySymbol)}`}
+                </button>
+              </>
+            )}
           </section>
         </div>
       )}
