@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using ZipFlow.Api.Data;
 using ZipFlow.Api.Domain;
+using ZipFlow.Api.Services;
 
 namespace ZipFlow.Api.Auth;
 
@@ -27,7 +28,8 @@ public sealed class AuthService(
     AppDbContext db,
     IJwtTokenService tokens,
     IPasswordHasher<AppUser> passwordHasher,
-    IConfiguration configuration) : IAuthService
+    IConfiguration configuration,
+    IAuditLogService audit) : IAuthService
 {
     public async Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken ct)
     {
@@ -41,11 +43,20 @@ public sealed class AuthService(
             .SingleOrDefaultAsync(x => x.Email == normalizedEmail && x.IsActive && x.Tenant.IsActive, ct);
 
         if (user is null)
+        {
+            // No tenant known for an unrecognized email — nothing to scope the row to, so skip it
+            // rather than writing a tenant-less audit entry.
             return null;
+        }
 
         var verification = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
         if (verification == PasswordVerificationResult.Failed)
+        {
+            await audit.LogAsync(
+                user.TenantId, user.Id, user.DefaultLocationId, "User", user.Id.ToString(), "LoginFailed",
+                summary: $"Failed login attempt for {user.Email}", ct: ct);
             return null;
+        }
 
         var roles = user.UserRoles
             .Select(x => x.Role)
@@ -55,6 +66,10 @@ public sealed class AuthService(
 
         var token = tokens.CreateAccessToken(user, roles);
         var tokenMinutes = configuration.GetValue<int>("Jwt:AccessTokenMinutes", 60);
+
+        await audit.LogAsync(
+            user.TenantId, user.Id, user.DefaultLocationId, "User", user.Id.ToString(), "Login",
+            summary: $"{user.Email} logged in", ct: ct);
 
         return new LoginResponse(
             token,

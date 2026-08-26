@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ZipFlow.Api.Data;
 using ZipFlow.Api.Domain;
+using ZipFlow.Api.Security;
 
 namespace ZipFlow.Api.Services;
 
@@ -65,7 +66,7 @@ public interface IOrderService
     Task<IReadOnlyList<OrderDto>> GetOrdersAsync(Guid tenantId, string? search, string? status, CancellationToken ct);
 }
 
-public sealed class OrderService(AppDbContext db) : IOrderService
+public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurrentRequestContext current) : IOrderService
 {
     public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
         Guid tenantId, Guid? locationId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
@@ -159,6 +160,11 @@ public sealed class OrderService(AppDbContext db) : IOrderService
 
         order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
         await db.SaveChangesAsync(ct);
+
+        await audit.LogAsync(
+            tenantId, current.UserId, locationId, "Order", order.Id.ToString(), "OrderCreated",
+            summary: $"Order #{order.OrderNumber} created ({status}, {serviceMode})",
+            metadata: new { order.OrderNumber, status, serviceMode, order.Total }, ct: ct);
 
         return (CreateOrderResult.Created, ToDto(order));
     }
@@ -312,6 +318,11 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
+        await audit.LogAsync(
+            tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderCompleted",
+            summary: $"Order #{order.OrderNumber} payment completed via {paymentMethod}",
+            metadata: new { order.OrderNumber, paymentMethod, order.Total }, ct: ct);
+
         return (CompleteOrderResult.Completed, ToDto(order));
     }
 
@@ -333,6 +344,21 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             await ReverseConsumptionAsync(order, ct);
 
         await db.SaveChangesAsync(ct);
+
+        if (status == "Cancelled" && !wasAlreadyCancelled)
+        {
+            await audit.LogAsync(
+                tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderVoided",
+                summary: $"Order #{order.OrderNumber} voided/cancelled",
+                metadata: new { order.OrderNumber, order.Total }, ct: ct);
+        }
+        else
+        {
+            await audit.LogAsync(
+                tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderStatusChanged",
+                summary: $"Order #{order.OrderNumber} status set to {status}",
+                metadata: new { order.OrderNumber, status }, ct: ct);
+        }
 
         return (SetStatusResult.Updated, ToDto(order));
     }

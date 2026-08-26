@@ -33,6 +33,7 @@ builder.Services.AddScoped<IKitchenService, KitchenService>();
 builder.Services.AddScoped<ITableService, TableService>();
 builder.Services.AddScoped<ISettingsService, SettingsService>();
 builder.Services.AddScoped<ICurrencyService, CurrencyService>();
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddScoped<FoundationSeeder>();
 
