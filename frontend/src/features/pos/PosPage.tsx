@@ -31,9 +31,12 @@ export function PosPage() {
   const [order, setOrder] = useState<OrderLine[]>([])
 
   const [currencies, setCurrencies] = useState<ActiveCurrency[]>([])
-  const [activeCurrency, setActiveCurrency] = useState<ActiveCurrency>({ code: 'GBP', symbol: '£', rate: 1 })
+  const [activeCurrency, setActiveCurrency] = useState<ActiveCurrency | null>(null)
+  const [currencyLoading, setCurrencyLoading] = useState(true)
+  const [currencyError, setCurrencyError] = useState('')
   const [vatRate, setVatRate] = useState(0)
   const [serviceChargeRate, setServiceChargeRate] = useState(0)
+  const [taxSettingsLoaded, setTaxSettingsLoaded] = useState(false)
 
   // Tables & Guests State
   const [tables, setTables] = useState<RestaurantTable[]>([])
@@ -47,6 +50,8 @@ export function PosPage() {
   const [newTableError, setNewTableError] = useState('')
   const [savingTable, setSavingTable] = useState(false)
   const [editingTableId, setEditingTableId] = useState<string | null>(null)
+  const [tablesLoadError, setTablesLoadError] = useState('')
+  const [tablesLoading, setTablesLoading] = useState(false)
 
   const [guestCount, setGuestCount] = useState(3)
   const [guestPickerOpen, setGuestPickerOpen] = useState(false)
@@ -61,6 +66,25 @@ export function PosPage() {
 
   const locked = currentOrderId !== null
 
+  const loadTables = (attempt = 1) => {
+    setTablesLoading(true)
+    setTablesLoadError('')
+    getTables()
+      .then((fetched) => {
+        setTables(fetched)
+        setSelectedTable((current) => current ?? fetched[0] ?? null)
+        setTablesLoading(false)
+      })
+      .catch((err) => {
+        if (attempt < 3) {
+          window.setTimeout(() => loadTables(attempt + 1), attempt * 1000)
+          return
+        }
+        setTablesLoading(false)
+        setTablesLoadError(err instanceof Error ? err.message : 'Failed to load tables.')
+      })
+  }
+
   useEffect(() => {
     getCatalog()
       .then((catalog) => {
@@ -70,14 +94,7 @@ export function PosPage() {
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load the menu.'))
       .finally(() => setLoading(false))
 
-    getTables()
-      .then((fetched) => {
-        setTables(fetched)
-        setSelectedTable((current) => current ?? fetched[0] ?? null)
-      })
-      .catch(() => {
-        // table picker is a convenience for Dine-in; a failed fetch shouldn't block the rest of POS
-      })
+    loadTables()
 
     getCurrencies()
       .then((settings) => {
@@ -85,9 +102,13 @@ export function PosPage() {
         setCurrencies([base, ...settings.supported.map((c) => ({ code: c.code, symbol: c.symbol, rate: c.rate }))])
         setActiveCurrency(base)
       })
-      .catch(() => {
-        // the currency switcher is a convenience; a failed fetch just leaves POS on its built-in default
+      .catch((err) => {
+        // unlike the other convenience settings, currency is required before an order can be
+        // priced/submitted correctly, so a failed fetch must keep the POS blocked rather than
+        // silently falling back to a hardcoded currency
+        setCurrencyError(err instanceof Error ? err.message : 'Failed to load currency settings.')
       })
+      .finally(() => setCurrencyLoading(false))
 
     getTaxSettings()
       .then((tax) => {
@@ -97,6 +118,7 @@ export function PosPage() {
       .catch(() => {
         // the live preview just falls back to 0% until this loads; the backend always computes the real charge
       })
+      .finally(() => setTaxSettingsLoaded(true))
   }, [])
 
   useEffect(() => {
@@ -124,10 +146,28 @@ export function PosPage() {
     return tables.filter((t) => t.section === tableSectionFilter)
   }, [tables, tableSectionFilter])
 
+  // Round-half-away-from-zero to 2dp, matching backend's
+  // Math.Round(x, 2, MidpointRounding.AwayFromZero) (OrderService.cs).
+  // JS's Math.round already rounds .5 up toward +Infinity, which is
+  // equivalent to AwayFromZero for the non-negative money values used here.
   const round2 = (n: number) => Math.round(n * 100) / 100
 
-  const subtotal = order.reduce((sum, line) => sum + line.price * line.quantity, 0)
-  const convertedSubtotal = round2(subtotal * activeCurrency.rate)
+  // activeCurrency stays null until the tenant's real base currency has loaded; fall back to a
+  // neutral rate/symbol for display math only — order submission is gated on currencyReady below,
+  // so these values never reach the backend before the real currency is known.
+  const currencyReady = activeCurrency !== null
+  const currencyRate = activeCurrency?.rate ?? 1
+  const currencySymbol = activeCurrency?.symbol ?? ''
+
+  // Mirror backend per-line rounding: each line's price is converted to the
+  // active currency and rounded to 2dp *before* being multiplied by quantity
+  // and summed, rather than rounding the whole subtotal once. Rounding the
+  // whole subtotal in one shot (as this used to do) can disagree with the
+  // backend by a cent on some orders.
+  const convertedSubtotal = order.reduce((sum, line) => {
+    const convertedPrice = round2(line.price * currencyRate)
+    return sum + convertedPrice * line.quantity
+  }, 0)
   const serviceCharge = round2(convertedSubtotal * serviceChargeRate)
   const tax = round2((convertedSubtotal + serviceCharge) * vatRate)
   const total = convertedSubtotal + serviceCharge + tax
@@ -172,6 +212,7 @@ export function PosPage() {
   }
 
   const handleSendToKitchen = async () => {
+    if (!activeCurrency) return
     setActionError('')
     setLastPrintableOrderId(null)
     setSending(true)
@@ -191,7 +232,7 @@ export function PosPage() {
   }
 
   const handlePay = async (method: 'Cash' | 'Card') => {
-    if (tenderTooLow) return
+    if (tenderTooLow || !activeCurrency) return
     setActionError('')
     setPaying(true)
     try {
@@ -296,7 +337,19 @@ export function PosPage() {
             ))}
           </div>
 
-          {currencies.length > 1 && (
+          {currencyLoading && (
+            <span className="quiet-pill pos-currency-loading" title="Loading currency settings">
+              Loading currency…
+            </span>
+          )}
+
+          {currencyError && (
+            <span className="alert error pos-currency-error" title={currencyError}>
+              Currency unavailable
+            </span>
+          )}
+
+          {activeCurrency && currencies.length > 1 && (
             <label className="currency-switcher" title="Currency for this sale">
               <Icon name="cash" size={14} />
               <select
@@ -355,7 +408,7 @@ export function PosPage() {
                 <strong>{product.name}</strong>
                 <small>{product.sku}</small>
               </span>
-              <span className="product-price">{formatMoney(product.price * activeCurrency.rate, activeCurrency.symbol)}</span>
+              <span className="product-price">{formatMoney(product.price * currencyRate, currencySymbol)}</span>
               <span className="product-add">
                 <Icon name="plus" />
               </span>
@@ -380,6 +433,14 @@ export function PosPage() {
               </button>
             ) : (
               <h1>{serviceMode}</h1>
+            )}
+            {tablesLoadError && (
+              <div className="alert error pos-tables-load-error">
+                <span>{tablesLoadError}</span>
+                <button type="button" className="pill-btn pill-btn-outline sm" onClick={() => loadTables()} disabled={tablesLoading}>
+                  {tablesLoading ? 'Retrying…' : 'Retry'}
+                </button>
+              </div>
             )}
           </div>
 
@@ -495,7 +556,7 @@ export function PosPage() {
                 <div>
                   <strong>{line.name}</strong>
                 </div>
-                <strong>{formatMoney(line.price * line.quantity * activeCurrency.rate, activeCurrency.symbol)}</strong>
+                <strong>{formatMoney(line.price * line.quantity * currencyRate, currencySymbol)}</strong>
               </div>
               <div className="line-actions">
                 <button
@@ -538,41 +599,50 @@ export function PosPage() {
         <div className="order-summary">
           <div>
             <span>Subtotal</span>
-            <strong>{formatMoney(convertedSubtotal, activeCurrency.symbol)}</strong>
+            <strong>{formatMoney(convertedSubtotal, currencySymbol)}</strong>
           </div>
           {serviceCharge > 0 && (
             <div>
               <span>Service charge · {(serviceChargeRate * 100).toFixed(2).replace(/\.?0+$/, '')}%</span>
-              <strong>{formatMoney(serviceCharge, activeCurrency.symbol)}</strong>
+              <strong>{formatMoney(serviceCharge, currencySymbol)}</strong>
             </div>
           )}
           <div>
             <span>VAT · {(vatRate * 100).toFixed(2).replace(/\.?0+$/, '')}%</span>
-            <strong>{formatMoney(tax, activeCurrency.symbol)}</strong>
+            <strong>{formatMoney(tax, currencySymbol)}</strong>
           </div>
           <div className="order-total">
             <span>Total</span>
-            <strong>{formatMoney(total, activeCurrency.symbol)}</strong>
+            <strong>{formatMoney(total, currencySymbol)}</strong>
           </div>
         </div>
 
         <div className="order-actions">
           <button
             className="send-button"
-            disabled={!order.length || locked || sending}
+            disabled={!order.length || locked || sending || !currencyReady}
             onClick={handleSendToKitchen}
+            title={!currencyReady ? 'Waiting for currency settings to load…' : undefined}
           >
-            {locked ? 'Sent to kitchen' : sending ? 'Sending…' : 'Send to kitchen'}
+            {locked ? 'Sent to kitchen' : sending ? 'Sending…' : !currencyReady ? 'Loading currency…' : 'Send to kitchen'}
           </button>
           <button
             className="pay-button"
-            disabled={!order.length}
+            disabled={!order.length || !currencyReady}
+            title={!currencyReady ? 'Waiting for currency settings to load…' : undefined}
             onClick={() => {
+              if (!taxSettingsLoaded) return
               setTenderedInput(amountDue.toFixed(2))
               setPaymentOpen(true)
             }}
           >
-            Pay <span>{formatMoney(total, activeCurrency.symbol)}</span>
+            {currencyReady ? (
+              <>
+                Pay <span>{formatMoney(total, currencySymbol)}</span>
+              </>
+            ) : (
+              'Loading currency…'
+            )}
           </button>
         </div>
       </aside>
@@ -602,6 +672,15 @@ export function PosPage() {
             </div>
 
             {newTableError && !newTableFormOpen && <div className="alert error table-modal-error">{newTableError}</div>}
+
+            {tablesLoadError && (
+              <div className="alert error table-modal-error">
+                <span>{tablesLoadError}</span>
+                <button type="button" className="pill-btn pill-btn-outline sm" onClick={() => loadTables()} disabled={tablesLoading}>
+                  {tablesLoading ? 'Retrying…' : 'Retry'}
+                </button>
+              </div>
+            )}
 
             {/* Add/Edit Table Form Dropdown Drawer */}
             {newTableFormOpen && (
@@ -755,7 +834,7 @@ export function PosPage() {
 
             <div className="payment-amount">
               <span>Amount due</span>
-              <strong>{formatMoney(amountDue, activeCurrency.symbol)}</strong>
+              <strong>{formatMoney(amountDue, currencySymbol)}</strong>
             </div>
 
             <label className="settings-field payment-tendered-field">
@@ -775,7 +854,7 @@ export function PosPage() {
             {!tenderTooLow && changeDue > 0 && (
               <div className="payment-change-due">
                 <span>Change due</span>
-                <strong>{formatMoney(changeDue, activeCurrency.symbol)}</strong>
+                <strong>{formatMoney(changeDue, currencySymbol)}</strong>
               </div>
             )}
 

@@ -22,6 +22,8 @@ export type LocationSummary = {
 export type LoginPayload = {
   accessToken: string
   expiresAt: string
+  refreshToken: string
+  refreshTokenExpiresAt: string
   user: AuthUser
   tenant: TenantSummary
   defaultLocation?: LocationSummary | null

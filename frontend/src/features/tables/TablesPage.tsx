@@ -37,10 +37,10 @@ export function TablesPage() {
 
     setSaving(true)
     try {
-      await createTable(name.trim(), section, cap)
+      const created = await createTable(name.trim(), section, cap)
+      setTables((prev) => [...prev, created])
       setName('')
       setCapacity('4')
-      await refetch()
     } catch (err) {
       setAddError(err instanceof Error ? err.message : 'Failed to add table.')
     } finally {
@@ -61,22 +61,22 @@ export function TablesPage() {
     if (!Number.isFinite(cap) || cap < 1) return setEditError('Capacity must be at least 1.')
 
     try {
-      await updateTable(table.id, editDraft.name.trim(), editDraft.section, cap)
+      const updated = await updateTable(table.id, editDraft.name.trim(), editDraft.section, cap)
+      setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       setEditingId(null)
-      await refetch()
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Failed to update table.')
     }
   }
 
   const changeStatus = async (table: RestaurantTable, status: TableStatus) => {
-    await setTableStatus(table.id, status)
-    await refetch()
+    const updated = await setTableStatus(table.id, status)
+    setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
   }
 
   const archive = async (table: RestaurantTable) => {
     await archiveTable(table.id)
-    await refetch()
+    setTables((prev) => prev.filter((t) => t.id !== table.id))
   }
 
   if (loading) {

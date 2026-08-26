@@ -1,5 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { apiRequest, clearAccessToken, getAccessToken, setAccessToken, type ApiEnvelope } from '../../lib/api'
+import {
+  apiRequest,
+  clearSessionTokens,
+  getAccessToken,
+  getRefreshToken,
+  setSessionTokens,
+  type ApiEnvelope,
+} from '../../lib/api'
 import type { AuthUser, LocationSummary, LoginPayload, TenantSummary } from './types'
 
 type Session = {
@@ -30,10 +37,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
+        // apiRequest silently refreshes the access token on a 401 before
+        // giving up, so a session survives across an 8+ hour shift as long
+        // as the refresh token is still valid.
         const me = await apiRequest<ApiEnvelope<Session>>('/api/me')
         setSession(me.data)
       } catch {
-        clearAccessToken()
+        clearSessionTokens()
       } finally {
         setLoading(false)
       }
@@ -48,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       body: JSON.stringify({ email, password }),
     })
 
-    setAccessToken(result.data.accessToken)
+    setSessionTokens(result.data.accessToken, result.data.refreshToken)
     setSession({
       user: result.data.user,
       tenant: result.data.tenant,
@@ -58,8 +68,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const logout = () => {
-    clearAccessToken()
+    const refreshToken = getRefreshToken()
+    clearSessionTokens()
     setSession(null)
+
+    if (refreshToken) {
+      // Best-effort server-side revocation; don't block the UI on it.
+      void apiRequest('/api/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
+      }).catch(() => {})
+    }
   }
 
   const value = useMemo(() => ({ session, loading, login, logout }), [session, loading])
