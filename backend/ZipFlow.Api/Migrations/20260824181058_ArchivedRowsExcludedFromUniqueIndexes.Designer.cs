@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ZipFlow.Api.Data;
@@ -11,9 +12,11 @@ using ZipFlow.Api.Data;
 namespace ZipFlow.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260824181058_ArchivedRowsExcludedFromUniqueIndexes")]
+    partial class ArchivedRowsExcludedFromUniqueIndexes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -407,19 +410,6 @@ namespace ZipFlow.Api.Migrations
                     b.HasIndex("OrderId");
 
                     b.ToTable("OrderLine", "pos");
-                });
-
-            modelBuilder.Entity("ZipFlow.Api.Domain.OrderNumberCounter", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("NextValue")
-                        .HasColumnType("integer");
-
-                    b.HasKey("TenantId");
-
-                    b.ToTable("OrderNumberCounter", "pos");
                 });
 
             modelBuilder.Entity("ZipFlow.Api.Domain.Permission", b =>
@@ -918,17 +908,6 @@ namespace ZipFlow.Api.Migrations
                     b.Navigation("MenuItem");
 
                     b.Navigation("Order");
-                });
-
-            modelBuilder.Entity("ZipFlow.Api.Domain.OrderNumberCounter", b =>
-                {
-                    b.HasOne("ZipFlow.Api.Domain.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("ZipFlow.Api.Domain.Recipe", b =>
