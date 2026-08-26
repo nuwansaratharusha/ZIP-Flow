@@ -8,6 +8,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
@@ -23,6 +24,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
     public DbSet<RestaurantTable> RestaurantTables => Set<RestaurantTable>();
     public DbSet<CurrencyRate> CurrencyRates => Set<CurrencyRate>();
+    public DbSet<OrderNumberCounter> OrderNumberCounters => Set<OrderNumberCounter>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,7 +51,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Code).HasMaxLength(12).IsRequired();
             b.Property(x => x.Symbol).HasMaxLength(8).IsRequired();
             b.Property(x => x.Rate).HasColumnType("decimal(18,6)");
-            b.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Code }).IsUnique().HasFilter("\"IsArchived\" = false");
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -74,6 +76,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasIndex(x => new { x.TenantId, x.Email }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.DefaultLocation).WithMany().HasForeignKey(x => x.DefaultLocationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RefreshToken>(b =>
+        {
+            b.ToTable("RefreshToken", "iam");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.TokenHash).HasMaxLength(200).IsRequired();
+            b.Property(x => x.ReplacedByTokenHash).HasMaxLength(200);
+            b.HasIndex(x => x.TokenHash).IsUnique();
+            b.HasIndex(x => new { x.UserId, x.ExpiresAt });
+            b.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Role>(b =>
@@ -160,12 +173,22 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.CurrencyCode).HasMaxLength(12).IsRequired();
             b.Property(x => x.CurrencySymbol).HasMaxLength(8).IsRequired();
             b.Property(x => x.ExchangeRate).HasColumnType("decimal(18,6)");
+            b.Property(x => x.BaseCurrencyCode).HasMaxLength(12).IsRequired();
+            b.Property(x => x.BaseCurrencySubtotal).HasColumnType("decimal(18,2)");
+            b.Property(x => x.BaseCurrencyTotal).HasColumnType("decimal(18,2)");
             b.Property(x => x.AmountTendered).HasColumnType("decimal(18,2)");
             b.Property(x => x.ChangeDue).HasColumnType("decimal(18,2)");
             b.HasIndex(x => new { x.TenantId, x.CreatedAt });
             b.HasIndex(x => new { x.TenantId, x.OrderNumber }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OrderNumberCounter>(b =>
+        {
+            b.ToTable("OrderNumberCounter", "pos");
+            b.HasKey(x => x.TenantId);
+            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<OrderLine>(b =>
@@ -187,7 +210,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Name).HasMaxLength(80).IsRequired();
             b.Property(x => x.Section).HasMaxLength(40).IsRequired();
             b.Property(x => x.Status).HasMaxLength(20).IsRequired();
-            b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique().HasFilter("\"IsArchived\" = false");
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -206,6 +229,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.ConversionFactor).HasColumnType("decimal(18,6)");
             b.HasIndex(x => new { x.TenantId, x.Sku }).IsUnique();
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            // Concurrency token backed by Postgres' xmin system column (Npgsql pattern —
+            // SQL Server's [Timestamp]/rowversion has no Postgres equivalent). Guards the
+            // read-modify-write on Quantity against lost updates from concurrent orders.
+            b.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").ValueGeneratedOnAddOrUpdate().IsRowVersion();
         });
 
         modelBuilder.Entity<StockAdjustment>(b =>

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ZipFlow.Api.Data;
 using ZipFlow.Api.Domain;
+using ZipFlow.Api.Security;
 
 namespace ZipFlow.Api.Services;
 
@@ -65,7 +66,7 @@ public interface IOrderService
     Task<IReadOnlyList<OrderDto>> GetOrdersAsync(Guid tenantId, string? search, string? status, CancellationToken ct);
 }
 
-public sealed class OrderService(AppDbContext db) : IOrderService
+public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurrentRequestContext current) : IOrderService
 {
     public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
         Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
@@ -122,22 +123,17 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             rate = currencyRate.Rate;
         }
 
-        var nextOrderNumber = (await db.Orders
-            .Where(x => x.TenantId == tenantId)
-            .Select(x => (int?)x.OrderNumber)
-            .MaxAsync(ct) ?? 0) + 1;
-
         var order = new Order
         {
             TenantId = tenantId,
             LocationId = locationId,
-            OrderNumber = nextOrderNumber,
             ServiceMode = serviceMode,
             Status = status,
             PaymentMethod = paymentMethod,
             CurrencyCode = currCode,
             CurrencySymbol = currSymbol,
-            ExchangeRate = rate
+            ExchangeRate = rate,
+            BaseCurrencyCode = tenant.CurrencyCode
         };
 
         if (clientOrderId is Guid newId)
@@ -166,6 +162,12 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.Tax = Math.Round((subtotal + order.ServiceCharge) * tenant.VatRate, 2, MidpointRounding.AwayFromZero);
         order.Total = order.Subtotal + order.ServiceCharge + order.Tax;
 
+        // Subtotal/Total above are in the transaction currency (post-FX). Also store the
+        // pre-conversion amounts in the tenant's base currency so cross-currency reports
+        // (sum of Total across orders) always aggregate a consistent unit.
+        order.BaseCurrencySubtotal = Math.Round(order.Subtotal / rate, 2, MidpointRounding.AwayFromZero);
+        order.BaseCurrencyTotal = Math.Round(order.Total / rate, 2, MidpointRounding.AwayFromZero);
+
         if (status == "Completed")
         {
             var tendered = amountTendered ?? order.Total;
@@ -177,11 +179,13 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         }
 
         db.Orders.Add(order);
-        await ConsumeIngredientsAsync(order, ct);
+        var stockAdjustments = await ConsumeIngredientsAsync(order, ct);
+
+        order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
 
         try
         {
-            await db.SaveChangesAsync(ct);
+            await SaveChangesWithStockRetryAsync(stockAdjustments, ct);
         }
         catch (DbUpdateException) when (clientOrderId is not null)
         {
@@ -196,7 +200,33 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             throw;
         }
 
+        await audit.LogAsync(
+            tenantId, current.UserId, locationId, "Order", order.Id.ToString(), "OrderCreated",
+            summary: $"Order #{order.OrderNumber} created ({status}, {serviceMode})",
+            metadata: new { order.OrderNumber, status, serviceMode, order.Total }, ct: ct);
+
         return (CreateOrderResult.Created, ToDto(order));
+    }
+
+    /// <summary>
+    /// Atomically claims the next order number for a tenant via a single upsert statement,
+    /// instead of reading MAX(OrderNumber) and hoping no other terminal grabs the same value
+    /// first. Postgres serializes the row-level update itself, so two terminals calling this
+    /// at the same instant are guaranteed distinct results — no collision is possible, so no
+    /// retry-on-conflict is needed.
+    /// </summary>
+    private async Task<int> NextOrderNumberAsync(Guid tenantId, CancellationToken ct)
+    {
+        var next = await db.Database.SqlQueryRaw<int>(
+            """
+            INSERT INTO pos."OrderNumberCounter" ("TenantId", "NextValue")
+            VALUES ({0}, 2)
+            ON CONFLICT ("TenantId") DO UPDATE
+                SET "NextValue" = pos."OrderNumberCounter"."NextValue" + 1
+            RETURNING "NextValue" - 1
+            """, tenantId).ToListAsync(ct);
+
+        return next[0];
     }
 
     /// <summary>
@@ -205,8 +235,10 @@ public sealed class OrderService(AppDbContext db) : IOrderService
     /// (InventoryService.AdjustStockAsync) keep the strict "no negative result" guard;
     /// automatic sale-driven consumption is intentionally permissive.
     /// </summary>
-    private async Task ConsumeIngredientsAsync(Order order, CancellationToken ct)
+    private async Task<Dictionary<Guid, List<StockAdjustment>>> ConsumeIngredientsAsync(Order order, CancellationToken ct)
     {
+        var adjustmentsByStockItem = new Dictionary<Guid, List<StockAdjustment>>();
+
         var menuItemIds = order.Lines.Select(l => l.MenuItemId).Distinct().ToArray();
         var recipes = await db.Recipes
             .Include(r => r.Lines)
@@ -214,7 +246,7 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             .ToDictionaryAsync(r => r.MenuItemId, ct);
 
         if (recipes.Count == 0)
-            return;
+            return adjustmentsByStockItem;
 
         var stockItemIds = recipes.Values.SelectMany(r => r.Lines).Select(l => l.StockItemId).Distinct().ToArray();
         var stockItems = await db.StockItems
@@ -239,7 +271,7 @@ public sealed class OrderService(AppDbContext db) : IOrderService
                 var before = stockItem.Quantity;
                 var after = before - stockUnitsConsumed;
 
-                db.StockAdjustments.Add(new StockAdjustment
+                var adjustment = new StockAdjustment
                 {
                     StockItemId = stockItem.Id,
                     Delta = -stockUnitsConsumed,
@@ -248,10 +280,72 @@ public sealed class OrderService(AppDbContext db) : IOrderService
                     Reason = $"Order #{order.OrderNumber} — {line.Name}",
                     OrderId = order.Id,
                     Kind = "Consumption"
-                });
+                };
+                db.StockAdjustments.Add(adjustment);
+
+                if (!adjustmentsByStockItem.TryGetValue(stockItem.Id, out var list))
+                    adjustmentsByStockItem[stockItem.Id] = list = new List<StockAdjustment>();
+                list.Add(adjustment);
 
                 stockItem.Quantity = after;
                 stockItem.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }
+
+        return adjustmentsByStockItem;
+    }
+
+    /// <summary>
+    /// StockItem.Quantity is guarded by a Postgres xmin concurrency token (see AppDbContext),
+    /// so a stale read-modify-write throws DbUpdateConcurrencyException on SaveChanges instead
+    /// of silently clobbering a concurrent order's decrement (issue #3). On conflict we don't
+    /// discard our change: we re-anchor each conflicting StockItem to the fresh database
+    /// quantity/xmin and re-apply the same delta (and shift the ledger rows recorded in this
+    /// call by the same amount so QuantityBefore/After stay accurate), then retry.
+    /// </summary>
+    private async Task SaveChangesWithStockRetryAsync(
+        Dictionary<Guid, List<StockAdjustment>> adjustmentsByStockItem, CancellationToken ct)
+    {
+        const int maxAttempts = 5;
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            {
+                foreach (var entry in db.ChangeTracker.Entries<StockItem>())
+                {
+                    if (entry.State != EntityState.Modified)
+                        continue;
+
+                    var databaseValues = await entry.GetDatabaseValuesAsync(ct);
+                    if (databaseValues is null)
+                        throw new InvalidOperationException(
+                            $"Stock item {entry.Entity.Id} was deleted concurrently while updating its quantity.");
+
+                    var proposedQuantity = entry.CurrentValues.GetValue<decimal>(nameof(StockItem.Quantity));
+                    var originalQuantity = entry.OriginalValues.GetValue<decimal>(nameof(StockItem.Quantity));
+                    var delta = proposedQuantity - originalQuantity;
+
+                    var freshQuantity = databaseValues.GetValue<decimal>(nameof(StockItem.Quantity));
+                    var shift = freshQuantity - originalQuantity;
+
+                    entry.CurrentValues[nameof(StockItem.Quantity)] = freshQuantity + delta;
+                    entry.OriginalValues.SetValues(databaseValues);
+
+                    if (adjustmentsByStockItem.TryGetValue(entry.Entity.Id, out var adjustments))
+                    {
+                        foreach (var adjustment in adjustments)
+                        {
+                            adjustment.QuantityBefore += shift;
+                            adjustment.QuantityAfter += shift;
+                        }
+                    }
+                }
             }
         }
     }
@@ -260,18 +354,20 @@ public sealed class OrderService(AppDbContext db) : IOrderService
     /// Idempotent via the ledger itself: skips if a Reversal-kind row already references this
     /// order, so repeated Cancelled transitions never double-restore stock.
     /// </summary>
-    private async Task ReverseConsumptionAsync(Order order, CancellationToken ct)
+    private async Task<Dictionary<Guid, List<StockAdjustment>>> ReverseConsumptionAsync(Order order, CancellationToken ct)
     {
+        var adjustmentsByStockItem = new Dictionary<Guid, List<StockAdjustment>>();
+
         var alreadyReversed = await db.StockAdjustments
             .AnyAsync(x => x.OrderId == order.Id && x.Kind == "Reversal", ct);
         if (alreadyReversed)
-            return;
+            return adjustmentsByStockItem;
 
         var consumptions = await db.StockAdjustments
             .Where(x => x.OrderId == order.Id && x.Kind == "Consumption")
             .ToListAsync(ct);
         if (consumptions.Count == 0)
-            return;
+            return adjustmentsByStockItem;
 
         var stockItemIds = consumptions.Select(x => x.StockItemId).Distinct().ToArray();
         var stockItems = await db.StockItems
@@ -287,7 +383,7 @@ public sealed class OrderService(AppDbContext db) : IOrderService
             var restore = -consumption.Delta;
             var after = before + restore;
 
-            db.StockAdjustments.Add(new StockAdjustment
+            var adjustment = new StockAdjustment
             {
                 StockItemId = stockItem.Id,
                 Delta = restore,
@@ -296,11 +392,18 @@ public sealed class OrderService(AppDbContext db) : IOrderService
                 Reason = $"Order #{order.OrderNumber} cancelled — reversal",
                 OrderId = order.Id,
                 Kind = "Reversal"
-            });
+            };
+            db.StockAdjustments.Add(adjustment);
+
+            if (!adjustmentsByStockItem.TryGetValue(stockItem.Id, out var list))
+                adjustmentsByStockItem[stockItem.Id] = list = new List<StockAdjustment>();
+            list.Add(adjustment);
 
             stockItem.Quantity = after;
             stockItem.UpdatedAt = DateTimeOffset.UtcNow;
         }
+
+        return adjustmentsByStockItem;
     }
 
     public async Task<(CompleteOrderResult Result, OrderDto? Order)> CompleteExistingOrderAsync(
@@ -327,6 +430,11 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
+        await audit.LogAsync(
+            tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderCompleted",
+            summary: $"Order #{order.OrderNumber} payment completed via {paymentMethod}",
+            metadata: new { order.OrderNumber, paymentMethod, order.Total }, ct: ct);
+
         return (CompleteOrderResult.Completed, ToDto(order));
     }
 
@@ -344,10 +452,26 @@ public sealed class OrderService(AppDbContext db) : IOrderService
         order.Status = status;
         order.UpdatedAt = DateTimeOffset.UtcNow;
 
-        if (status == "Cancelled" && !wasAlreadyCancelled)
-            await ReverseConsumptionAsync(order, ct);
+        var stockAdjustments = status == "Cancelled" && !wasAlreadyCancelled
+            ? await ReverseConsumptionAsync(order, ct)
+            : new Dictionary<Guid, List<StockAdjustment>>();
 
-        await db.SaveChangesAsync(ct);
+        await SaveChangesWithStockRetryAsync(stockAdjustments, ct);
+
+        if (status == "Cancelled" && !wasAlreadyCancelled)
+        {
+            await audit.LogAsync(
+                tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderVoided",
+                summary: $"Order #{order.OrderNumber} voided/cancelled",
+                metadata: new { order.OrderNumber, order.Total }, ct: ct);
+        }
+        else
+        {
+            await audit.LogAsync(
+                tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderStatusChanged",
+                summary: $"Order #{order.OrderNumber} status set to {status}",
+                metadata: new { order.OrderNumber, status }, ct: ct);
+        }
 
         return (SetStatusResult.Updated, ToDto(order));
     }

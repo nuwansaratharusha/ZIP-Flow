@@ -57,6 +57,19 @@ public sealed class AppUser : EntityBase
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
 }
 
+public sealed class RefreshToken : EntityBase
+{
+    public Guid UserId { get; set; }
+    public AppUser User { get; set; } = null!;
+    public string TokenHash { get; set; } = string.Empty;
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+    public string? ReplacedByTokenHash { get; set; }
+    public bool IsRevoked => RevokedAt.HasValue;
+    public bool IsExpired => DateTimeOffset.UtcNow >= ExpiresAt;
+    public bool IsActive => !IsRevoked && !IsExpired;
+}
+
 public sealed class Role : EntityBase
 {
     public Guid TenantId { get; set; }
@@ -148,9 +161,25 @@ public sealed class Order : EntityBase
     public string CurrencyCode { get; set; } = string.Empty;
     public string CurrencySymbol { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1m;
+    public string BaseCurrencyCode { get; set; } = string.Empty;
+    public decimal BaseCurrencySubtotal { get; set; }
+    public decimal BaseCurrencyTotal { get; set; }
     public decimal AmountTendered { get; set; }
     public decimal ChangeDue { get; set; }
     public ICollection<OrderLine> Lines { get; set; } = new List<OrderLine>();
+}
+
+/// <summary>
+/// One row per tenant. OrderNumber values are drawn from here via a single atomic
+/// UPDATE ... RETURNING statement (see OrderService.NextOrderNumberAsync), so no two
+/// terminals can ever be handed the same number — the database serializes the increment
+/// itself instead of the app coordinating retries after a collision.
+/// </summary>
+public sealed class OrderNumberCounter
+{
+    public Guid TenantId { get; set; }
+    public Tenant Tenant { get; set; } = null!;
+    public int NextValue { get; set; } = 1;
 }
 
 public sealed class OrderLine : EntityBase
@@ -181,6 +210,14 @@ public sealed class StockItem : EntityBase
     public string RecipeUnit { get; set; } = string.Empty;
     public decimal ConversionFactor { get; set; } = 1;
     public ICollection<StockAdjustment> Adjustments { get; set; } = new List<StockAdjustment>();
+
+    /// <summary>
+    /// Postgres system column mapped as an EF Core concurrency token (see AppDbContext:
+    /// IsRowVersion()). Every UPDATE to this row implicitly checks xmin, so a stale
+    /// read-modify-write on Quantity throws DbUpdateConcurrencyException instead of
+    /// silently overwriting a concurrent decrement.
+    /// </summary>
+    public uint RowVersion { get; set; }
 }
 
 public sealed class StockAdjustment : EntityBase
