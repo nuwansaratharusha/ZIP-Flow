@@ -19,7 +19,7 @@ sends it.
   └──────┬──────┘
          │
   ┌──────▼──────┐
-  │ Destination │  eat-in: type marker number
+  │ Destination │  dine-in: type marker number
   │             │  takeaway: nothing (collection number is generated)
   └──────┬──────┘
          │
@@ -119,7 +119,7 @@ screen; the server always computes the real charge.
 
 ```
 ┌────────────────────────────────┬──────────────────────┐
-│  Eat in │ Takeaway │ Delivery  │  Order               │
+│  Dine in │ Takeaway │ Delivery │  Order               │
 │  ──────────────────────────    │  Marker 12           │
 │  [search]                      │──────────────────────│
 │  All │ Mains │ Sides │ Drinks  │  2× Burger    £11.00 │
@@ -145,8 +145,8 @@ Right: destination, order lines, totals, one Charge button.
 | State | Holds |
 |---|---|
 | `order` | Line items with quantity and notes |
-| `serviceMode` | Eat in / Takeaway / Delivery |
-| `destinationLabel` | Marker number, eat-in only |
+| `serviceMode` | Dine in / Takeaway / Delivery |
+| `destinationLabel` | Marker number, dine-in only |
 | `activeCurrency` | Selected currency and rate |
 | `paymentOpen` | Payment sheet visible |
 | `tendered` | Cash entry |
@@ -183,7 +183,7 @@ Charge is blocked while tendered is below the total.
 
 | Service mode | Destination | Set by |
 |---|---|---|
-| Eat in | Marker number | Cashier types it |
+| Dine in | Marker number | Cashier types it |
 | Takeaway | Collection number | Generated at creation |
 | Delivery | Collection number | Generated at creation |
 
