@@ -48,6 +48,8 @@ export function PosPage() {
   const [newTableError, setNewTableError] = useState('')
   const [savingTable, setSavingTable] = useState(false)
   const [editingTableId, setEditingTableId] = useState<string | null>(null)
+  const [tablesLoadError, setTablesLoadError] = useState('')
+  const [tablesLoading, setTablesLoading] = useState(false)
 
   const [guestCount, setGuestCount] = useState(3)
   const [guestPickerOpen, setGuestPickerOpen] = useState(false)
@@ -62,6 +64,25 @@ export function PosPage() {
 
   const locked = currentOrderId !== null
 
+  const loadTables = (attempt = 1) => {
+    setTablesLoading(true)
+    setTablesLoadError('')
+    getTables()
+      .then((fetched) => {
+        setTables(fetched)
+        setSelectedTable((current) => current ?? fetched[0] ?? null)
+        setTablesLoading(false)
+      })
+      .catch((err) => {
+        if (attempt < 3) {
+          window.setTimeout(() => loadTables(attempt + 1), attempt * 1000)
+          return
+        }
+        setTablesLoading(false)
+        setTablesLoadError(err instanceof Error ? err.message : 'Failed to load tables.')
+      })
+  }
+
   useEffect(() => {
     getCatalog()
       .then((catalog) => {
@@ -71,14 +92,7 @@ export function PosPage() {
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load the menu.'))
       .finally(() => setLoading(false))
 
-    getTables()
-      .then((fetched) => {
-        setTables(fetched)
-        setSelectedTable((current) => current ?? fetched[0] ?? null)
-      })
-      .catch(() => {
-        // table picker is a convenience for Dine-in; a failed fetch shouldn't block the rest of POS
-      })
+    loadTables()
 
     getCurrencies()
       .then((settings) => {
@@ -383,6 +397,14 @@ export function PosPage() {
             ) : (
               <h1>{serviceMode}</h1>
             )}
+            {tablesLoadError && (
+              <div className="alert error pos-tables-load-error">
+                <span>{tablesLoadError}</span>
+                <button type="button" className="pill-btn pill-btn-outline sm" onClick={() => loadTables()} disabled={tablesLoading}>
+                  {tablesLoading ? 'Retrying…' : 'Retry'}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="order-header-right">
@@ -612,6 +634,15 @@ export function PosPage() {
             </div>
 
             {newTableError && !newTableFormOpen && <div className="alert error table-modal-error">{newTableError}</div>}
+
+            {tablesLoadError && (
+              <div className="alert error table-modal-error">
+                <span>{tablesLoadError}</span>
+                <button type="button" className="pill-btn pill-btn-outline sm" onClick={() => loadTables()} disabled={tablesLoading}>
+                  {tablesLoading ? 'Retrying…' : 'Retry'}
+                </button>
+              </div>
+            )}
 
             {/* Add/Edit Table Form Dropdown Drawer */}
             {newTableFormOpen && (
