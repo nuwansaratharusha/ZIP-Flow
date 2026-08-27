@@ -27,6 +27,18 @@ export function cancelOrder(orderId: string) {
   }).then((res) => res.data)
 }
 
+export function printRound(orderId: string, roundNumber: number) {
+  return apiRequest<ApiEnvelope<object>>(`/api/orders/${orderId}/rounds/${roundNumber}/print`, {
+    method: 'POST',
+  }).then(() => undefined)
+}
+
+export function printBill(orderId: string) {
+  return apiRequest<ApiEnvelope<object>>(`/api/orders/${orderId}/bill/print`, {
+    method: 'POST',
+  }).then(() => undefined)
+}
+
 export function getOrders(filters?: { search?: string; status?: string }) {
   const params = new URLSearchParams()
   if (filters?.search) params.set('search', filters.search)
