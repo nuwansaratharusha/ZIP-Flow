@@ -35,6 +35,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.ReceiptBusinessName).HasMaxLength(160);
             b.Property(x => x.ReceiptFooterMessage).HasMaxLength(200).IsRequired();
             b.Property(x => x.ReceiptTaxId).HasMaxLength(60);
+            b.Property(x => x.PrinterIpAddress).HasMaxLength(64);
+            b.Property(x => x.PrinterPort).HasDefaultValue(9100);
             b.Property(x => x.VatRate).HasColumnType("decimal(9,6)");
             b.Property(x => x.ServiceChargeRate).HasColumnType("decimal(9,6)");
             b.HasIndex(x => x.Code).IsUnique();

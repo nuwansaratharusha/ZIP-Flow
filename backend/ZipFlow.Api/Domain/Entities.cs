@@ -20,6 +20,8 @@ public sealed class Tenant : EntityBase
     public string? ReceiptTaxId { get; set; }
     public decimal VatRate { get; set; } = 0.10m;
     public decimal ServiceChargeRate { get; set; }
+    public string? PrinterIpAddress { get; set; }
+    public int PrinterPort { get; set; } = 9100;
     public ICollection<Location> Locations { get; set; } = new List<Location>();
 }
 
