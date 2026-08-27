@@ -484,7 +484,7 @@ input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1
 .product-add svg { width: 13px; height: 13px; }
 .product-tile:hover .product-add { background: #2563eb; border-color: #2563eb; color: white; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3); }
 
-.order-panel { background: #ffffff; border-left: 1px solid #eceef2; display: flex; flex-direction: column; min-width: 0; }
+.order-panel { background: #ffffff; border-left: 1px solid #eceef2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .order-header { padding: 18px 20px 10px; display: flex; align-items: center; justify-content: space-between; }
 .order-header h1 { font-size: 20px; font-weight: 800; letter-spacing: -.03em; margin: 0; color: #0f172a; }
 .order-meta { display: inline-flex; align-items: center; gap: 5px; background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; border-radius: 9999px; padding: 5px 9px; font-size: 11px; font-weight: 700; }
@@ -1146,7 +1146,8 @@ input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1
 
 @media (max-width: 800px) {
   .metric-grid, .module-grid { grid-template-columns: 1fr; }
-  .pos-page { height: auto; min-height: calc(100vh - 62px); grid-template-columns: 1fr; }
+  .pos-page { height: auto; min-height: calc(100vh - 62px); grid-template-columns: 1fr; overflow: visible; }
+  .order-lines { overflow-y: visible; }
 }
 
 /* POS confirmation + Orders detail print action */

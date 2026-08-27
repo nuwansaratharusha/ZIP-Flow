@@ -397,8 +397,8 @@ export function PosPage() {
         {closeError && <div className="alert error posx-inline-alert">{closeError}</div>}
         {cancelError && <div className="alert error posx-inline-alert">{cancelError}</div>}
         {roundLines.length > 0 && (
-          <div className="alert error posx-inline-alert posx-unsent-warning">
-            You have an unsent round. Send it before closing the order, or its items will be lost.
+          <div className="posx-unsent-warning">
+            <Icon name="clock" /> Unsent round — send it before closing, or these items will be lost.
           </div>
         )}
 
