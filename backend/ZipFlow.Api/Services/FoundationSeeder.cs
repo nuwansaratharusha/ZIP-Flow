@@ -132,6 +132,57 @@ public sealed class FoundationSeeder(
         if (!await db.UserRoles.AnyAsync(x => x.UserId == admin.Id && x.RoleId == adminRole.Id, ct))
             db.UserRoles.Add(new UserRole { UserId = admin.Id, RoleId = adminRole.Id });
 
+        var waiterRole = await db.Roles
+            .Include(x => x.RolePermissions)
+            .SingleOrDefaultAsync(x => x.TenantId == tenant.Id && x.Code == "WAITER", ct);
+
+        if (waiterRole is null)
+        {
+            waiterRole = new Role
+            {
+                TenantId = tenant.Id,
+                Code = "WAITER",
+                Name = "Waiter",
+                IsSystemRole = true
+            };
+            db.Roles.Add(waiterRole);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var waiterPermissionCodes = new[]
+        {
+            "pos.orders.view", "pos.orders.create", "pos.orders.manage", "pos.tables.view", "menu.items.view"
+        };
+        var waiterPermissions = await db.Permissions.Where(x => waiterPermissionCodes.Contains(x.Code)).ToListAsync(ct);
+        var waiterGrantedIds = await db.RolePermissions
+            .Where(x => x.RoleId == waiterRole.Id)
+            .Select(x => x.PermissionId)
+            .ToListAsync(ct);
+
+        foreach (var permission in waiterPermissions.Where(x => !waiterGrantedIds.Contains(x.Id)))
+            db.RolePermissions.Add(new RolePermission { RoleId = waiterRole.Id, PermissionId = permission.Id });
+
+        var waiterEmail = (configuration["BootstrapAdmin:WaiterEmail"] ?? "waiter@zipflow.local").Trim().ToLowerInvariant();
+        var waiterUser = await db.Users.SingleOrDefaultAsync(x => x.TenantId == tenant.Id && x.Email == waiterEmail, ct);
+        if (waiterUser is null)
+        {
+            waiterUser = new AppUser
+            {
+                TenantId = tenant.Id,
+                DefaultLocationId = location.Id,
+                Email = waiterEmail,
+                DisplayName = configuration["BootstrapAdmin:WaiterDisplayName"] ?? "Demo Waiter"
+            };
+            waiterUser.PasswordHash = passwordHasher.HashPassword(
+                waiterUser,
+                configuration["BootstrapAdmin:WaiterPassword"] ?? "ChangeMe123!");
+            db.Users.Add(waiterUser);
+            await db.SaveChangesAsync(ct);
+        }
+
+        if (!await db.UserRoles.AnyAsync(x => x.UserId == waiterUser.Id && x.RoleId == waiterRole.Id, ct))
+            db.UserRoles.Add(new UserRole { UserId = waiterUser.Id, RoleId = waiterRole.Id });
+
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Development foundation bootstrap is ready for tenant {TenantCode}.", tenant.Code);
     }
