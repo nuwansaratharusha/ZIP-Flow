@@ -1,8 +1,10 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
+import { WaiterShell } from '../components/WaiterShell'
 import { AuthProvider } from '../features/auth/AuthContext'
 import { LoginPage } from '../features/auth/LoginPage'
 import { ProtectedRoute } from '../features/auth/ProtectedRoute'
+import { WaiterOnlyGuard } from '../features/auth/WaiterOnlyGuard'
 import { DashboardPage } from '../features/dashboard/DashboardPage'
 import { MenuPage } from '../features/menu/MenuPage'
 import { OrdersPage } from '../features/orders/OrdersPage'
@@ -18,14 +20,22 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
-            <Route element={<AppShell />}>
-              <Route index element={<DashboardPage />} />
-              <Route path="tables" element={<TablesPage />} />
-              <Route path="pos" element={<Navigate to="/tables" replace />} />
-              <Route path="pos/:orderId" element={<PosPage />} />
-              <Route path="orders" element={<OrdersPage />} />
-              <Route path="menu" element={<MenuPage />} />
-              <Route path="settings" element={<SettingsPage />} />
+            <Route element={<WaiterOnlyGuard />}>
+              <Route element={<AppShell />}>
+                <Route index element={<DashboardPage />} />
+                <Route path="tables" element={<TablesPage />} />
+                <Route path="pos" element={<Navigate to="/tables" replace />} />
+                <Route path="pos/:orderId" element={<PosPage />} />
+                <Route path="orders" element={<OrdersPage />} />
+                <Route path="menu" element={<MenuPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
+            </Route>
+            <Route element={<WaiterShell />}>
+              <Route path="waiter" element={<Navigate to="/waiter/tables" replace />} />
+              <Route path="waiter/tables" element={<TablesPage />} />
+              <Route path="waiter/pos" element={<Navigate to="/waiter/tables" replace />} />
+              <Route path="waiter/pos/:orderId" element={<PosPage />} />
             </Route>
           </Route>
           <Route element={<ProtectedRoute />}>
