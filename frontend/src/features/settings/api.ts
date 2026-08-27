@@ -1,5 +1,5 @@
 import { apiRequest, type ApiEnvelope } from '../../lib/api'
-import type { ReceiptSettings, TaxSettings } from './types'
+import type { PrinterSettings, ReceiptSettings, TaxSettings } from './types'
 
 export function getReceiptSettings() {
   return apiRequest<ApiEnvelope<ReceiptSettings>>('/api/settings/receipt').then((res) => res.data)
@@ -25,5 +25,16 @@ export function updateTaxSettings(vatRatePercent: number, serviceChargeRatePerce
   return apiRequest<ApiEnvelope<TaxSettings>>('/api/settings/tax', {
     method: 'PUT',
     body: JSON.stringify({ vatRatePercent, serviceChargeRatePercent }),
+  }).then((res) => res.data)
+}
+
+export function getPrinterSettings() {
+  return apiRequest<ApiEnvelope<PrinterSettings>>('/api/settings/printer').then((res) => res.data)
+}
+
+export function updatePrinterSettings(ipAddress: string | null, port: number) {
+  return apiRequest<ApiEnvelope<PrinterSettings>>('/api/settings/printer', {
+    method: 'PUT',
+    body: JSON.stringify({ ipAddress, port }),
   }).then((res) => res.data)
 }

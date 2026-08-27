@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { getReceiptSettings, getTaxSettings, updateReceiptSettings, updateTaxSettings } from './api'
+import { getPrinterSettings, getReceiptSettings, getTaxSettings, updatePrinterSettings, updateReceiptSettings, updateTaxSettings } from './api'
 
 export function SettingsPage() {
   const [loading, setLoading] = useState(true)
@@ -20,15 +20,23 @@ export function SettingsPage() {
   const [taxError, setTaxError] = useState('')
   const [taxSaved, setTaxSaved] = useState(false)
 
+  const [printerIp, setPrinterIp] = useState('')
+  const [printerPort, setPrinterPort] = useState('9100')
+  const [printerSaving, setPrinterSaving] = useState(false)
+  const [printerError, setPrinterError] = useState('')
+  const [printerSaved, setPrinterSaved] = useState(false)
+
   useEffect(() => {
-    Promise.all([getReceiptSettings(), getTaxSettings()])
-      .then(([receipt, tax]) => {
+    Promise.all([getReceiptSettings(), getTaxSettings(), getPrinterSettings()])
+      .then(([receipt, tax, printer]) => {
         setBusinessName(receipt.businessName)
         setFooterMessage(receipt.footerMessage)
         setShowTaxId(receipt.showTaxId)
         setTaxId(receipt.taxId ?? '')
         setVatRate(String(tax.vatRatePercent))
         setServiceChargeRate(String(tax.serviceChargeRatePercent))
+        setPrinterIp(printer.ipAddress ?? '')
+        setPrinterPort(String(printer.port))
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load settings.'))
       .finally(() => setLoading(false))
@@ -80,6 +88,27 @@ export function SettingsPage() {
       setTaxError(err instanceof Error ? err.message : 'Failed to save charges.')
     } finally {
       setTaxSaving(false)
+    }
+  }
+
+  const savePrinterSettings = async (event: FormEvent) => {
+    event.preventDefault()
+    setPrinterError('')
+    setPrinterSaved(false)
+
+    const port = Number(printerPort)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return setPrinterError('Port must be between 1 and 65535.')
+
+    setPrinterSaving(true)
+    try {
+      const updated = await updatePrinterSettings(printerIp.trim() || null, port)
+      setPrinterIp(updated.ipAddress ?? '')
+      setPrinterPort(String(updated.port))
+      setPrinterSaved(true)
+    } catch (err) {
+      setPrinterError(err instanceof Error ? err.message : 'Failed to save printer settings.')
+    } finally {
+      setPrinterSaving(false)
     }
   }
 
@@ -164,6 +193,32 @@ export function SettingsPage() {
         <p className="muted currency-section-note">
           Applied automatically to every order: the service charge is calculated on the subtotal, then VAT is calculated
           on the subtotal plus the service charge. Set service charge to 0 to leave it off.
+        </p>
+      </section>
+
+      <section className="section-card">
+        <div className="section-heading">
+          <div><p className="eyebrow">Hardware</p><h2>Counter printer</h2></div>
+        </div>
+
+        <form className="settings-form currency-base-form" onSubmit={savePrinterSettings}>
+          <label className="settings-field">
+            Printer IP address
+            <input value={printerIp} onChange={(e) => setPrinterIp(e.target.value)} placeholder="e.g. 192.168.1.50" />
+          </label>
+          <label className="settings-field">
+            Port
+            <input value={printerPort} onChange={(e) => setPrinterPort(e.target.value)} type="number" min="1" max="65535" placeholder="9100" />
+          </label>
+          {printerError && <div className="alert error">{printerError}</div>}
+          {printerSaved && !printerError && <div className="alert success">Printer settings saved.</div>}
+          <button className="primary-button" type="submit" disabled={printerSaving}>
+            {printerSaving ? 'Saving…' : 'Save printer'}
+          </button>
+        </form>
+
+        <p className="muted currency-section-note">
+          Round tickets and bills print here automatically when a waiter sends a round or closes an order.
         </p>
       </section>
     </main>

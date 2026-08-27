@@ -6,6 +6,7 @@ namespace ZipFlow.Api.Endpoints;
 
 public sealed record UpdateReceiptSettingsRequest(string? BusinessName, string FooterMessage, bool ShowTaxId, string? TaxId);
 public sealed record UpdateTaxSettingsRequest(decimal VatRatePercent, decimal ServiceChargeRatePercent);
+public sealed record UpdatePrinterSettingsRequest(string? IpAddress, int Port);
 
 public static class SettingsEndpoints
 {
@@ -53,6 +54,24 @@ public static class SettingsEndpoints
                 : Results.BadRequest(ApiResponse<object>.Fail(error!));
         })
         .RequireAuthorization("permission:settings.tax.manage");
+
+        group.MapGet("/printer", async (ICurrentRequestContext current, ISettingsService settings, CancellationToken ct) =>
+        {
+            var dto = await settings.GetPrinterSettingsAsync(current.TenantId, ct);
+            return dto is null
+                ? Results.NotFound(ApiResponse<object>.Fail("Tenant not found."))
+                : Results.Ok(ApiResponse<PrinterSettingsDto>.Ok(dto));
+        })
+        .RequireAuthorization("permission:settings.receipt.view");
+
+        group.MapPut("/printer", async (UpdatePrinterSettingsRequest request, ICurrentRequestContext current, ISettingsService settings, CancellationToken ct) =>
+        {
+            var (success, error, dto) = await settings.UpdatePrinterSettingsAsync(current.TenantId, request.IpAddress, request.Port, ct);
+            return success
+                ? Results.Ok(ApiResponse<PrinterSettingsDto>.Ok(dto!))
+                : Results.BadRequest(ApiResponse<object>.Fail(error!));
+        })
+        .RequireAuthorization("permission:settings.receipt.manage");
 
         return app;
     }

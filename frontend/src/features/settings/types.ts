@@ -9,3 +9,8 @@ export type TaxSettings = {
   vatRatePercent: number
   serviceChargeRatePercent: number
 }
+
+export type PrinterSettings = {
+  ipAddress: string | null
+  port: number
+}
