@@ -1,17 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { Icon } from '../../components/Icon'
-import {
-  addCurrency,
-  getCurrencies,
-  getReceiptSettings,
-  getTaxSettings,
-  removeCurrency,
-  updateBaseCurrency,
-  updateCurrency,
-  updateReceiptSettings,
-  updateTaxSettings,
-} from './api'
-import type { CurrencySettings } from './types'
+import { getPrinterSettings, getReceiptSettings, getTaxSettings, updatePrinterSettings, updateReceiptSettings, updateTaxSettings } from './api'
 
 export function SettingsPage() {
   const [loading, setLoading] = useState(true)
@@ -21,26 +9,10 @@ export function SettingsPage() {
   const [footerMessage, setFooterMessage] = useState('')
   const [showTaxId, setShowTaxId] = useState(false)
   const [taxId, setTaxId] = useState('')
-  const [showCollectionCode, setShowCollectionCode] = useState(true)
 
   const [saveError, setSaveError] = useState('')
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
-
-  const [currencySettings, setCurrencySettings] = useState<CurrencySettings | null>(null)
-  const [baseCode, setBaseCode] = useState('')
-  const [baseSymbol, setBaseSymbol] = useState('')
-  const [baseSaving, setBaseSaving] = useState(false)
-  const [baseError, setBaseError] = useState('')
-
-  const [drafts, setDrafts] = useState<Record<string, { symbol: string; rate: string }>>({})
-  const [rowSavingId, setRowSavingId] = useState<string | null>(null)
-  const [currencyError, setCurrencyError] = useState('')
-
-  const [newCode, setNewCode] = useState('')
-  const [newSymbol, setNewSymbol] = useState('')
-  const [newRate, setNewRate] = useState('')
-  const [addingCurrency, setAddingCurrency] = useState(false)
 
   const [vatRate, setVatRate] = useState('')
   const [serviceChargeRate, setServiceChargeRate] = useState('')
@@ -48,41 +20,23 @@ export function SettingsPage() {
   const [taxError, setTaxError] = useState('')
   const [taxSaved, setTaxSaved] = useState(false)
 
-  const applyCurrencySettings = (settings: CurrencySettings) => {
-    setCurrencySettings(settings)
-    setBaseCode(settings.baseCode)
-    setBaseSymbol(settings.baseSymbol)
-    setDrafts(Object.fromEntries(settings.supported.map((c) => [c.id!, { symbol: c.symbol, rate: String(c.rate) }])))
-  }
-
-  // Like applyCurrencySettings, but only refreshes the draft for the row that was just
-  // saved/removed/added (or any row not yet tracked in drafts) instead of rebuilding the
-  // whole drafts record - so other rows' in-progress unsaved edits are left untouched.
-  const mergeCurrencySettings = (settings: CurrencySettings, changedId?: string) => {
-    setCurrencySettings(settings)
-    setBaseCode(settings.baseCode)
-    setBaseSymbol(settings.baseSymbol)
-    setDrafts((prev) => {
-      const next: Record<string, { symbol: string; rate: string }> = {}
-      for (const c of settings.supported) {
-        const id = c.id!
-        next[id] = id === changedId || !(id in prev) ? { symbol: c.symbol, rate: String(c.rate) } : prev[id]
-      }
-      return next
-    })
-  }
+  const [printerIp, setPrinterIp] = useState('')
+  const [printerPort, setPrinterPort] = useState('9100')
+  const [printerSaving, setPrinterSaving] = useState(false)
+  const [printerError, setPrinterError] = useState('')
+  const [printerSaved, setPrinterSaved] = useState(false)
 
   useEffect(() => {
-    Promise.all([getReceiptSettings(), getCurrencies(), getTaxSettings()])
-      .then(([receipt, currencies, tax]) => {
+    Promise.all([getReceiptSettings(), getTaxSettings(), getPrinterSettings()])
+      .then(([receipt, tax, printer]) => {
         setBusinessName(receipt.businessName)
         setFooterMessage(receipt.footerMessage)
         setShowTaxId(receipt.showTaxId)
         setTaxId(receipt.taxId ?? '')
-        setShowCollectionCode(receipt.showCollectionCode)
-        applyCurrencySettings(currencies)
         setVatRate(String(tax.vatRatePercent))
         setServiceChargeRate(String(tax.serviceChargeRatePercent))
+        setPrinterIp(printer.ipAddress ?? '')
+        setPrinterPort(String(printer.port))
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load settings.'))
       .finally(() => setLoading(false))
@@ -102,7 +56,6 @@ export function SettingsPage() {
         footerMessage: footerMessage.trim(),
         showTaxId,
         taxId: taxId.trim() || null,
-        showCollectionCode,
       })
       setBusinessName(updated.businessName)
       setFooterMessage(updated.footerMessage)
@@ -112,69 +65,6 @@ export function SettingsPage() {
       setSaveError(err instanceof Error ? err.message : 'Failed to save settings.')
     } finally {
       setSaving(false)
-    }
-  }
-
-  const saveBaseCurrency = async (event: FormEvent) => {
-    event.preventDefault()
-    setBaseError('')
-    if (!baseCode.trim() || !baseSymbol.trim()) return setBaseError('A currency code and symbol are required.')
-
-    setBaseSaving(true)
-    try {
-      applyCurrencySettings(await updateBaseCurrency(baseCode.trim(), baseSymbol.trim()))
-    } catch (err) {
-      setBaseError(err instanceof Error ? err.message : 'Failed to update base currency.')
-    } finally {
-      setBaseSaving(false)
-    }
-  }
-
-  const saveRow = async (id: string) => {
-    setCurrencyError('')
-    const draft = drafts[id]
-    const rate = Number(draft.rate)
-    if (!draft.symbol.trim() || !(rate > 0)) return setCurrencyError('Enter a symbol and a rate greater than zero.')
-
-    setRowSavingId(id)
-    try {
-      mergeCurrencySettings(await updateCurrency(id, draft.symbol.trim(), rate), id)
-    } catch (err) {
-      setCurrencyError(err instanceof Error ? err.message : 'Failed to update currency.')
-    } finally {
-      setRowSavingId(null)
-    }
-  }
-
-  const removeRow = async (id: string) => {
-    setCurrencyError('')
-    setRowSavingId(id)
-    try {
-      mergeCurrencySettings(await removeCurrency(id), id)
-    } catch (err) {
-      setCurrencyError(err instanceof Error ? err.message : 'Failed to remove currency.')
-    } finally {
-      setRowSavingId(null)
-    }
-  }
-
-  const addNewCurrency = async (event: FormEvent) => {
-    event.preventDefault()
-    setCurrencyError('')
-    const rate = Number(newRate)
-    if (!newCode.trim() || !newSymbol.trim() || !(rate > 0))
-      return setCurrencyError('Enter a code, symbol, and a rate greater than zero.')
-
-    setAddingCurrency(true)
-    try {
-      mergeCurrencySettings(await addCurrency(newCode.trim(), newSymbol.trim(), rate))
-      setNewCode('')
-      setNewSymbol('')
-      setNewRate('')
-    } catch (err) {
-      setCurrencyError(err instanceof Error ? err.message : 'Failed to add currency.')
-    } finally {
-      setAddingCurrency(false)
     }
   }
 
@@ -201,6 +91,27 @@ export function SettingsPage() {
     }
   }
 
+  const savePrinterSettings = async (event: FormEvent) => {
+    event.preventDefault()
+    setPrinterError('')
+    setPrinterSaved(false)
+
+    const port = Number(printerPort)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return setPrinterError('Port must be between 1 and 65535.')
+
+    setPrinterSaving(true)
+    try {
+      const updated = await updatePrinterSettings(printerIp.trim() || null, port)
+      setPrinterIp(updated.ipAddress ?? '')
+      setPrinterPort(String(updated.port))
+      setPrinterSaved(true)
+    } catch (err) {
+      setPrinterError(err instanceof Error ? err.message : 'Failed to save printer settings.')
+    } finally {
+      setPrinterSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <main className="content menu-content">
@@ -215,7 +126,7 @@ export function SettingsPage() {
         <div>
           <p className="eyebrow">Configuration</p>
           <h1>Settings</h1>
-          <p className="muted">Customize receipts and the currencies available at checkout.</p>
+          <p className="muted">Customize receipts and the charges applied to every order.</p>
         </div>
       </div>
 
@@ -248,11 +159,6 @@ export function SettingsPage() {
               <input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="e.g. VAT-123456" />
             </label>
           )}
-
-          <label className="settings-checkbox">
-            <input type="checkbox" checked={showCollectionCode} onChange={(e) => setShowCollectionCode(e.target.checked)} />
-            Show collection code on Takeaway / Delivery receipts
-          </label>
 
           {saveError && <div className="alert error">{saveError}</div>}
           {saved && !saveError && <div className="alert success">Settings saved.</div>}
@@ -292,86 +198,28 @@ export function SettingsPage() {
 
       <section className="section-card">
         <div className="section-heading">
-          <div><p className="eyebrow">Currency</p><h2>Base currency &amp; exchange rates</h2></div>
+          <div><p className="eyebrow">Hardware</p><h2>Counter printer</h2></div>
         </div>
 
-        <form className="settings-form currency-base-form" onSubmit={saveBaseCurrency}>
+        <form className="settings-form currency-base-form" onSubmit={savePrinterSettings}>
           <label className="settings-field">
-            Base currency code
-            <input value={baseCode} onChange={(e) => setBaseCode(e.target.value)} placeholder="e.g. GBP" maxLength={12} />
+            Printer IP address
+            <input value={printerIp} onChange={(e) => setPrinterIp(e.target.value)} placeholder="e.g. 192.168.1.50" />
           </label>
           <label className="settings-field">
-            Symbol
-            <input value={baseSymbol} onChange={(e) => setBaseSymbol(e.target.value)} placeholder="e.g. £" maxLength={8} />
+            Port
+            <input value={printerPort} onChange={(e) => setPrinterPort(e.target.value)} type="number" min="1" max="65535" placeholder="9100" />
           </label>
-          {baseError && <div className="alert error">{baseError}</div>}
-          <button className="primary-button" type="submit" disabled={baseSaving}>
-            {baseSaving ? 'Saving…' : 'Save base currency'}
+          {printerError && <div className="alert error">{printerError}</div>}
+          {printerSaved && !printerError && <div className="alert success">Printer settings saved.</div>}
+          <button className="primary-button" type="submit" disabled={printerSaving}>
+            {printerSaving ? 'Saving…' : 'Save printer'}
           </button>
         </form>
 
         <p className="muted currency-section-note">
-          All prices are entered and stored in the base currency. Cashiers can switch to any currency below at the POS —
-          amounts are converted using the rate you set here.
+          Round tickets and bills print here automatically when a waiter sends a round or closes an order.
         </p>
-
-        {currencySettings && currencySettings.supported.length > 0 && (
-          <div className="menu-table currency-table">
-            <div className="menu-row menu-row-head currency-row">
-              <span>Code</span>
-              <span>Symbol</span>
-              <span>Rate (per 1 {currencySettings.baseCode})</span>
-              <span></span>
-            </div>
-            {currencySettings.supported.map((c) => (
-              <div className="menu-row currency-row" key={c.id}>
-                <span className="menu-item-name">{c.code}</span>
-                <input
-                  className="currency-inline-input"
-                  value={drafts[c.id!]?.symbol ?? ''}
-                  onChange={(e) => setDrafts((prev) => ({ ...prev, [c.id!]: { ...prev[c.id!], symbol: e.target.value } }))}
-                />
-                <input
-                  className="currency-inline-input"
-                  type="number"
-                  step="0.0001"
-                  min="0"
-                  value={drafts[c.id!]?.rate ?? ''}
-                  onChange={(e) => setDrafts((prev) => ({ ...prev, [c.id!]: { ...prev[c.id!], rate: e.target.value } }))}
-                />
-                <span className="currency-row-actions">
-                  <button type="button" onClick={() => saveRow(c.id!)} disabled={rowSavingId === c.id}>Save</button>
-                  <button type="button" onClick={() => removeRow(c.id!)} disabled={rowSavingId === c.id}>
-                    <Icon name="trash" size={12} />
-                  </button>
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <form className="new-table-drawer currency-add-form" onSubmit={addNewCurrency}>
-          <p className="new-table-drawer-title">Add a supported currency</p>
-          <div className="new-table-form-row">
-            <div className="form-input-group">
-              <label>Code</label>
-              <input value={newCode} onChange={(e) => setNewCode(e.target.value)} placeholder="e.g. USD" maxLength={12} />
-            </div>
-            <div className="form-input-group">
-              <label>Symbol</label>
-              <input value={newSymbol} onChange={(e) => setNewSymbol(e.target.value)} placeholder="e.g. $" maxLength={8} />
-            </div>
-            <div className="form-input-group">
-              <label>Rate</label>
-              <input value={newRate} onChange={(e) => setNewRate(e.target.value)} type="number" step="0.0001" min="0" placeholder="e.g. 1.27" />
-            </div>
-            <button type="submit" className="pill-btn pill-btn-primary sm" disabled={addingCurrency} style={{ alignSelf: 'flex-end', height: '38px' }}>
-              {addingCurrency ? 'Adding…' : 'Add currency'}
-            </button>
-          </div>
-        </form>
-
-        {currencyError && <div className="alert error">{currencyError}</div>}
       </section>
     </main>
   )

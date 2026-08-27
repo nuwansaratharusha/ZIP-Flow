@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using ZipFlow.Api.Data;
 using ZipFlow.Api.Domain;
 using ZipFlow.Api.Security;
@@ -7,59 +8,70 @@ namespace ZipFlow.Api.Services;
 
 public sealed record OrderLineRequest(Guid MenuItemId, int Quantity, string? Notes = null);
 public sealed record OrderLineDto(string Name, int Quantity, decimal Price, decimal LineTotal, string? Notes);
+public sealed record OrderRoundDto(Guid Id, int RoundNumber, DateTimeOffset SentAt, decimal RoundTotal, IReadOnlyList<OrderLineDto> Lines);
 public sealed record OrderDto(
     Guid Id,
     int OrderNumber,
-    string ServiceMode,
+    Guid TableId,
+    string TableName,
+    string CustomerName,
+    string? CustomerPhone,
+    int? GuestCount,
     string Status,
-    string? PaymentMethod,
     decimal Subtotal,
     decimal ServiceCharge,
     decimal Tax,
     decimal Total,
     string CurrencyCode,
     string CurrencySymbol,
-    decimal AmountTendered,
-    decimal ChangeDue,
     DateTimeOffset CreatedAt,
-    IReadOnlyList<OrderLineDto> Lines);
+    DateTimeOffset? ClosedAt,
+    IReadOnlyList<OrderRoundDto> Rounds);
 
-public enum CreateOrderResult
+public enum OpenOrderResult
 {
-    Created,
-    EmptyOrder,
-    ItemNotFound,
-    UnsupportedCurrency,
-    InsufficientTender
+    Opened,
+    InvalidCustomerName,
+    TableNotFound,
+    TableArchived,
+    TableOccupied
 }
 
-public enum CompleteOrderResult
+public enum SendRoundResult
 {
-    Completed,
+    Sent,
+    OrderNotFound,
+    OrderNotOpen,
+    EmptyLines,
+    InvalidQuantity,
+    MenuItemNotFound
+}
+
+public enum CloseOrderResult
+{
+    Closed,
     NotFound,
-    NotAwaitingPayment,
-    InsufficientTender
+    NotOpen
 }
 
-public enum SetStatusResult
+public enum CancelOrderResult
 {
-    Updated,
-    NotFound
+    Cancelled,
+    NotFound,
+    NotOpen
 }
 
 public interface IOrderService
 {
-    Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
-        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
+    Task<(OpenOrderResult Result, OrderDto? Order)> OpenOrderAsync(
+        Guid tenantId, Guid? id, Guid tableId, string customerName, string? customerPhone, CancellationToken ct);
 
-    Task<(CreateOrderResult Result, OrderDto? Order)> CreateCompletedOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
+    Task<(SendRoundResult Result, OrderDto? Order)> SendRoundAsync(
+        Guid tenantId, Guid orderId, Guid? id, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct);
 
-    Task<(CompleteOrderResult Result, OrderDto? Order)> CompleteExistingOrderAsync(
-        Guid tenantId, Guid orderId, string paymentMethod, decimal? amountTendered, CancellationToken ct);
+    Task<(CloseOrderResult Result, OrderDto? Order)> CloseOrderAsync(Guid tenantId, Guid orderId, CancellationToken ct);
 
-    Task<(SetStatusResult Result, OrderDto? Order)> SetStatusAsync(
-        Guid tenantId, Guid orderId, string status, CancellationToken ct);
+    Task<(CancelOrderResult Result, OrderDto? Order)> CancelOrderAsync(Guid tenantId, Guid orderId, CancellationToken ct);
 
     Task<OrderDto?> GetOrderAsync(Guid tenantId, Guid orderId, CancellationToken ct);
 
@@ -68,144 +80,257 @@ public interface IOrderService
 
 public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurrentRequestContext current) : IOrderService
 {
-    public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateSentOrderAsync(
-        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string? currencyCode, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
-        => await CreateOrderAsync(tenantId, locationId, clientOrderId, serviceMode, "Sent", null, currencyCode, null, lines, ct);
-
-    public async Task<(CreateOrderResult Result, OrderDto? Order)> CreateCompletedOrderAsync(
-        Guid tenantId, Guid? locationId, string serviceMode, string paymentMethod, string? currencyCode, decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
-        => await CreateOrderAsync(tenantId, locationId, null, serviceMode, "Completed", paymentMethod, currencyCode, amountTendered, lines, ct);
-
-    private async Task<(CreateOrderResult Result, OrderDto? Order)> CreateOrderAsync(
-        Guid tenantId, Guid? locationId, Guid? clientOrderId, string serviceMode, string status, string? paymentMethod, string? currencyCode,
-        decimal? amountTendered, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
+    public async Task<(OpenOrderResult Result, OrderDto? Order)> OpenOrderAsync(
+        Guid tenantId, Guid? id, Guid tableId, string customerName, string? customerPhone, CancellationToken ct)
     {
-        if (lines.Count == 0)
-            return (CreateOrderResult.EmptyOrder, null);
-
-        // Idempotency: if the client supplied its own order Id (e.g. to survive a
-        // dropped-connection retry), and an order with that Id already exists for this
-        // tenant, treat this call as already processed instead of creating a duplicate.
-        if (clientOrderId is Guid existingId)
+        // Idempotency: a retried "open table" call carries the same client-supplied id.
+        if (id is Guid existingId)
         {
-            var existingOrder = await db.Orders
-                .AsNoTracking()
-                .Include(x => x.Lines)
-                .SingleOrDefaultAsync(x => x.Id == existingId && x.TenantId == tenantId, ct);
-            if (existingOrder is not null)
-                return (CreateOrderResult.Created, ToDto(existingOrder));
+            var existing = await LoadOrderAsync(tenantId, existingId, ct);
+            if (existing is not null)
+                return (OpenOrderResult.Opened, ToDto(existing));
         }
 
-        var itemIds = lines.Select(x => x.MenuItemId).Distinct().ToArray();
-        var menuItems = await db.MenuItems
-            .AsNoTracking()
-            .Where(x => x.TenantId == tenantId && itemIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, ct);
+        var name = customerName.Trim();
+        if (name.Length == 0)
+            return (OpenOrderResult.InvalidCustomerName, null);
+        var phone = string.IsNullOrWhiteSpace(customerPhone) ? null : customerPhone.Trim();
 
-        if (menuItems.Count != itemIds.Length)
-            return (CreateOrderResult.ItemNotFound, null);
+        var table = await db.RestaurantTables.SingleOrDefaultAsync(x => x.Id == tableId && x.TenantId == tenantId, ct);
+        if (table is null)
+            return (OpenOrderResult.TableNotFound, null);
+        if (table.IsArchived)
+            return (OpenOrderResult.TableArchived, null);
+        // Friendly pre-check only — the partial unique index below is the real guarantee under a race.
+        if (table.Status.Equals("occupied", StringComparison.OrdinalIgnoreCase))
+            return (OpenOrderResult.TableOccupied, null);
 
         var tenant = await db.Tenants.AsNoTracking().SingleAsync(x => x.Id == tenantId, ct);
-
-        string currCode = tenant.CurrencyCode;
-        string currSymbol = tenant.CurrencySymbol;
-        decimal rate = 1m;
-
-        if (!string.IsNullOrWhiteSpace(currencyCode) && !string.Equals(currencyCode, tenant.CurrencyCode, StringComparison.OrdinalIgnoreCase))
-        {
-            var currencyRate = await db.CurrencyRates.AsNoTracking().SingleOrDefaultAsync(
-                x => x.TenantId == tenantId && x.Code == currencyCode.Trim().ToUpperInvariant() && !x.IsArchived, ct);
-            if (currencyRate is null)
-                return (CreateOrderResult.UnsupportedCurrency, null);
-
-            currCode = currencyRate.Code;
-            currSymbol = currencyRate.Symbol;
-            rate = currencyRate.Rate;
-        }
 
         var order = new Order
         {
             TenantId = tenantId,
-            LocationId = locationId,
-            ServiceMode = serviceMode,
-            Status = status,
-            PaymentMethod = paymentMethod,
-            CurrencyCode = currCode,
-            CurrencySymbol = currSymbol,
-            ExchangeRate = rate,
-            BaseCurrencyCode = tenant.CurrencyCode
+            LocationId = current.DefaultLocationId,
+            TableId = tableId,
+            CustomerName = name,
+            CustomerPhone = phone,
+            OpenedByUserId = current.UserId,
+            Status = "Open",
+            Subtotal = 0,
+            ServiceCharge = 0,
+            Tax = 0,
+            Total = 0,
+            CurrencyCode = tenant.CurrencyCode,
+            CurrencySymbol = tenant.CurrencySymbol
         };
-
-        if (clientOrderId is Guid newId)
+        if (id is Guid newId)
             order.Id = newId;
 
-        decimal subtotal = 0;
+        order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
+
+        table.Status = "occupied";
+        table.UpdatedAt = DateTimeOffset.UtcNow;
+
+        db.Orders.Add(order);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex, "IX_Order_TableId"))
+        {
+            // Two waiters opened the same table at the same instant; Postgres let one insert
+            // through and rejected this one. Report a clean conflict, not a generic 500.
+            return (OpenOrderResult.TableOccupied, null);
+        }
+
+        await audit.LogAsync(
+            tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderOpened",
+            summary: $"Order #{order.OrderNumber} opened for {order.CustomerName} on table {table.Name}",
+            metadata: new { order.OrderNumber, TableId = tableId, order.CustomerName }, ct: ct);
+
+        var loaded = await LoadOrderAsync(tenantId, order.Id, ct);
+        return (OpenOrderResult.Opened, ToDto(loaded!));
+    }
+
+    public async Task<(SendRoundResult Result, OrderDto? Order)> SendRoundAsync(
+        Guid tenantId, Guid orderId, Guid? id, IReadOnlyList<OrderLineRequest> lines, CancellationToken ct)
+    {
+        var order = await db.Orders
+            .Include(x => x.Table)
+            .Include(x => x.Rounds).ThenInclude(x => x.Lines)
+            .SingleOrDefaultAsync(x => x.Id == orderId && x.TenantId == tenantId, ct);
+        if (order is null)
+            return (SendRoundResult.OrderNotFound, null);
+        if (order.Status != "Open")
+            return (SendRoundResult.OrderNotOpen, null);
+
+        // Idempotent replay: this round id is already on the order, so an earlier attempt
+        // did get through. Report success — re-inserting would be caught by PK_OrderRound
+        // below, but only after EF's change tracker had already rejected the duplicate.
+        if (id is Guid replayedId && order.Rounds.Any(x => x.Id == replayedId))
+            return (SendRoundResult.Sent, ToDto(order));
+
+        if (lines.Count == 0)
+            return (SendRoundResult.EmptyLines, null);
+        if (lines.Any(x => x.Quantity < 1))
+            return (SendRoundResult.InvalidQuantity, null);
+
+        var itemIds = lines.Select(x => x.MenuItemId).Distinct().ToArray();
+        var menuItems = await db.MenuItems
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && itemIds.Contains(x.Id) && x.IsAvailable && !x.IsArchived)
+            .ToDictionaryAsync(x => x.Id, ct);
+        if (menuItems.Count != itemIds.Length)
+            return (SendRoundResult.MenuItemNotFound, null);
+
+        var tenant = await db.Tenants.AsNoTracking().SingleAsync(x => x.Id == tenantId, ct);
+
+        var nextRoundNumber = order.Rounds.Count == 0 ? 1 : order.Rounds.Max(x => x.RoundNumber) + 1;
+        var round = new OrderRound
+        {
+            Id = id ?? Guid.NewGuid(),
+            OrderId = order.Id,
+            RoundNumber = nextRoundNumber,
+            SentAt = DateTimeOffset.UtcNow
+        };
+
         foreach (var line in lines)
         {
+            // Snapshot name/price at send time — never a live join. History must survive
+            // a later menu edit unchanged.
             var item = menuItems[line.MenuItemId];
-            var price = Math.Round(item.Price * rate, 2, MidpointRounding.AwayFromZero);
-            var lineTotal = price * line.Quantity;
-            subtotal += lineTotal;
-            order.Lines.Add(new OrderLine
+            var lineTotal = Math.Round(item.Price * line.Quantity, 2, MidpointRounding.AwayFromZero);
+            round.Lines.Add(new OrderLine
             {
+                OrderId = order.Id,
                 MenuItemId = item.Id,
                 Name = item.Name,
-                Price = price,
+                Price = item.Price,
                 Quantity = line.Quantity,
                 LineTotal = lineTotal,
                 Notes = string.IsNullOrWhiteSpace(line.Notes) ? null : line.Notes.Trim()
             });
         }
 
-        order.Subtotal = subtotal;
-        order.ServiceCharge = Math.Round(subtotal * tenant.ServiceChargeRate, 2, MidpointRounding.AwayFromZero);
-        order.Tax = Math.Round((subtotal + order.ServiceCharge) * tenant.VatRate, 2, MidpointRounding.AwayFromZero);
-        order.Total = order.Subtotal + order.ServiceCharge + order.Tax;
+        order.Rounds.Add(round);
+        db.OrderRounds.Add(round);
 
-        // Subtotal/Total above are in the transaction currency (post-FX). Also store the
-        // pre-conversion amounts in the tenant's base currency so cross-currency reports
-        // (sum of Total across orders) always aggregate a consistent unit.
-        order.BaseCurrencySubtotal = Math.Round(order.Subtotal / rate, 2, MidpointRounding.AwayFromZero);
-        order.BaseCurrencyTotal = Math.Round(order.Total / rate, 2, MidpointRounding.AwayFromZero);
-
-        if (status == "Completed")
-        {
-            var tendered = amountTendered ?? order.Total;
-            if (tendered < order.Total)
-                return (CreateOrderResult.InsufficientTender, null);
-
-            order.AmountTendered = tendered;
-            order.ChangeDue = tendered - order.Total;
-        }
-
-        db.Orders.Add(order);
-        var stockAdjustments = await ConsumeIngredientsAsync(order, ct);
-
-        order.OrderNumber = await NextOrderNumberAsync(tenantId, ct);
+        RecomputeTotals(order, tenant);
 
         try
         {
-            await SaveChangesWithStockRetryAsync(stockAdjustments, ct);
+            await db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException) when (clientOrderId is not null)
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex, "PK_OrderRound"))
         {
-            // Two retries of the same client-generated order Id raced each other; the other
-            // one won. Return its result instead of failing or double-consuming stock.
-            var winner = await db.Orders
-                .AsNoTracking()
-                .Include(x => x.Lines)
-                .SingleOrDefaultAsync(x => x.Id == clientOrderId && x.TenantId == tenantId, ct);
-            if (winner is not null)
-                return (CreateOrderResult.Created, ToDto(winner));
-            throw;
+            // A retried "send round" carries the same client-supplied round id, so the
+            // retry's INSERT fails on the primary key — the round already went through.
+            // Return the order's current state as a success, not an error.
+            var reloaded = await LoadOrderAsync(tenantId, orderId, ct);
+            return (SendRoundResult.Sent, ToDto(reloaded!));
         }
 
         await audit.LogAsync(
-            tenantId, current.UserId, locationId, "Order", order.Id.ToString(), "OrderCreated",
-            summary: $"Order #{order.OrderNumber} created ({status}, {serviceMode})",
-            metadata: new { order.OrderNumber, status, serviceMode, order.Total }, ct: ct);
+            tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderRoundSent",
+            summary: $"Round {round.RoundNumber} sent for order #{order.OrderNumber} ({round.Lines.Count} line(s))",
+            metadata: new { order.OrderNumber, round.RoundNumber, LineCount = round.Lines.Count }, ct: ct);
 
-        return (CreateOrderResult.Created, ToDto(order));
+        var loaded = await LoadOrderAsync(tenantId, orderId, ct);
+        return (SendRoundResult.Sent, ToDto(loaded!));
+    }
+
+    public async Task<(CloseOrderResult Result, OrderDto? Order)> CloseOrderAsync(Guid tenantId, Guid orderId, CancellationToken ct)
+    {
+        var order = await db.Orders
+            .Include(x => x.Table)
+            .Include(x => x.Rounds).ThenInclude(x => x.Lines)
+            .SingleOrDefaultAsync(x => x.Id == orderId && x.TenantId == tenantId, ct);
+        if (order is null)
+            return (CloseOrderResult.NotFound, null);
+        if (order.Status != "Open")
+            return (CloseOrderResult.NotOpen, null);
+
+        var tenant = await db.Tenants.AsNoTracking().SingleAsync(x => x.Id == tenantId, ct);
+
+        RecomputeTotals(order, tenant);
+        order.Status = "Closed";
+        order.ClosedAt = DateTimeOffset.UtcNow;
+        order.UpdatedAt = DateTimeOffset.UtcNow;
+
+        order.Table.Status = "available";
+        order.Table.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+
+        await audit.LogAsync(
+            tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderClosed",
+            summary: $"Order #{order.OrderNumber} closed, total {order.CurrencySymbol}{order.Total}",
+            metadata: new { order.OrderNumber, order.Total }, ct: ct);
+
+        var loaded = await LoadOrderAsync(tenantId, orderId, ct);
+        return (CloseOrderResult.Closed, ToDto(loaded!));
+    }
+
+    public async Task<(CancelOrderResult Result, OrderDto? Order)> CancelOrderAsync(Guid tenantId, Guid orderId, CancellationToken ct)
+    {
+        var order = await db.Orders
+            .Include(x => x.Table)
+            .SingleOrDefaultAsync(x => x.Id == orderId && x.TenantId == tenantId, ct);
+        if (order is null)
+            return (CancelOrderResult.NotFound, null);
+        if (order.Status != "Open")
+            return (CancelOrderResult.NotOpen, null);
+
+        order.Status = "Cancelled";
+        order.UpdatedAt = DateTimeOffset.UtcNow;
+
+        order.Table.Status = "available";
+        order.Table.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+
+        await audit.LogAsync(
+            tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderCancelled",
+            summary: $"Order #{order.OrderNumber} cancelled for table {order.Table.Name}",
+            metadata: new { order.OrderNumber }, ct: ct);
+
+        var loaded = await LoadOrderAsync(tenantId, orderId, ct);
+        return (CancelOrderResult.Cancelled, ToDto(loaded!));
+    }
+
+    public async Task<OrderDto?> GetOrderAsync(Guid tenantId, Guid orderId, CancellationToken ct)
+    {
+        var order = await LoadOrderAsync(tenantId, orderId, ct);
+        return order is null ? null : ToDto(order);
+    }
+
+    public async Task<IReadOnlyList<OrderDto>> GetOrdersAsync(Guid tenantId, string? search, string? status, CancellationToken ct)
+    {
+        var query = db.Orders
+            .AsNoTracking()
+            .Include(x => x.Table)
+            .Include(x => x.Rounds).ThenInclude(x => x.Lines)
+            .Where(x => x.TenantId == tenantId);
+
+        if (!string.IsNullOrWhiteSpace(status) && !status.Equals("All", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(x => x.Status == status);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLower();
+            query = query.Where(x =>
+                x.OrderNumber.ToString().Contains(term) ||
+                x.CustomerName.ToLower().Contains(term) ||
+                x.Table.Name.ToLower().Contains(term) ||
+                x.Lines.Any(l => l.Name.ToLower().Contains(term)));
+        }
+
+        var orders = await query
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync(ct);
+
+        return orders.Select(ToDto).ToArray();
     }
 
     /// <summary>
@@ -229,302 +354,58 @@ public sealed class OrderService(AppDbContext db, IAuditLogService audit, ICurre
         return next[0];
     }
 
-    /// <summary>
-    /// Never blocks the sale and never rejects on a negative result — a negative theoretical
-    /// balance here is meaningful shrinkage/variance data, not an error. Manual counts
-    /// (InventoryService.AdjustStockAsync) keep the strict "no negative result" guard;
-    /// automatic sale-driven consumption is intentionally permissive.
-    /// </summary>
-    private async Task<Dictionary<Guid, List<StockAdjustment>>> ConsumeIngredientsAsync(Order order, CancellationToken ct)
-    {
-        var adjustmentsByStockItem = new Dictionary<Guid, List<StockAdjustment>>();
-
-        var menuItemIds = order.Lines.Select(l => l.MenuItemId).Distinct().ToArray();
-        var recipes = await db.Recipes
-            .Include(r => r.Lines)
-            .Where(r => menuItemIds.Contains(r.MenuItemId))
-            .ToDictionaryAsync(r => r.MenuItemId, ct);
-
-        if (recipes.Count == 0)
-            return adjustmentsByStockItem;
-
-        var stockItemIds = recipes.Values.SelectMany(r => r.Lines).Select(l => l.StockItemId).Distinct().ToArray();
-        var stockItems = await db.StockItems
-            .Where(x => stockItemIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, ct);
-
-        foreach (var line in order.Lines)
-        {
-            if (!recipes.TryGetValue(line.MenuItemId, out var recipe))
-                continue;
-
-            foreach (var ingredient in recipe.Lines)
-            {
-                if (!stockItems.TryGetValue(ingredient.StockItemId, out var stockItem))
-                    continue;
-
-                var recipeUnitsNeeded = ingredient.Quantity / recipe.Yield * line.Quantity;
-                var stockUnitsConsumed = stockItem.ConversionFactor > 0
-                    ? recipeUnitsNeeded / stockItem.ConversionFactor
-                    : recipeUnitsNeeded;
-
-                var before = stockItem.Quantity;
-                var after = before - stockUnitsConsumed;
-
-                var adjustment = new StockAdjustment
-                {
-                    StockItemId = stockItem.Id,
-                    Delta = -stockUnitsConsumed,
-                    QuantityBefore = before,
-                    QuantityAfter = after,
-                    Reason = $"Order #{order.OrderNumber} — {line.Name}",
-                    OrderId = order.Id,
-                    Kind = "Consumption"
-                };
-                db.StockAdjustments.Add(adjustment);
-
-                if (!adjustmentsByStockItem.TryGetValue(stockItem.Id, out var list))
-                    adjustmentsByStockItem[stockItem.Id] = list = new List<StockAdjustment>();
-                list.Add(adjustment);
-
-                stockItem.Quantity = after;
-                stockItem.UpdatedAt = DateTimeOffset.UtcNow;
-            }
-        }
-
-        return adjustmentsByStockItem;
-    }
-
-    /// <summary>
-    /// StockItem.Quantity is guarded by a Postgres xmin concurrency token (see AppDbContext),
-    /// so a stale read-modify-write throws DbUpdateConcurrencyException on SaveChanges instead
-    /// of silently clobbering a concurrent order's decrement (issue #3). On conflict we don't
-    /// discard our change: we re-anchor each conflicting StockItem to the fresh database
-    /// quantity/xmin and re-apply the same delta (and shift the ledger rows recorded in this
-    /// call by the same amount so QuantityBefore/After stay accurate), then retry.
-    /// </summary>
-    private async Task SaveChangesWithStockRetryAsync(
-        Dictionary<Guid, List<StockAdjustment>> adjustmentsByStockItem, CancellationToken ct)
-    {
-        const int maxAttempts = 5;
-
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                await db.SaveChangesAsync(ct);
-                return;
-            }
-            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
-            {
-                foreach (var entry in db.ChangeTracker.Entries<StockItem>())
-                {
-                    if (entry.State != EntityState.Modified)
-                        continue;
-
-                    var databaseValues = await entry.GetDatabaseValuesAsync(ct);
-                    if (databaseValues is null)
-                        throw new InvalidOperationException(
-                            $"Stock item {entry.Entity.Id} was deleted concurrently while updating its quantity.");
-
-                    var proposedQuantity = entry.CurrentValues.GetValue<decimal>(nameof(StockItem.Quantity));
-                    var originalQuantity = entry.OriginalValues.GetValue<decimal>(nameof(StockItem.Quantity));
-                    var delta = proposedQuantity - originalQuantity;
-
-                    var freshQuantity = databaseValues.GetValue<decimal>(nameof(StockItem.Quantity));
-                    var shift = freshQuantity - originalQuantity;
-
-                    entry.CurrentValues[nameof(StockItem.Quantity)] = freshQuantity + delta;
-                    entry.OriginalValues.SetValues(databaseValues);
-
-                    if (adjustmentsByStockItem.TryGetValue(entry.Entity.Id, out var adjustments))
-                    {
-                        foreach (var adjustment in adjustments)
-                        {
-                            adjustment.QuantityBefore += shift;
-                            adjustment.QuantityAfter += shift;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Idempotent via the ledger itself: skips if a Reversal-kind row already references this
-    /// order, so repeated Cancelled transitions never double-restore stock.
-    /// </summary>
-    private async Task<Dictionary<Guid, List<StockAdjustment>>> ReverseConsumptionAsync(Order order, CancellationToken ct)
-    {
-        var adjustmentsByStockItem = new Dictionary<Guid, List<StockAdjustment>>();
-
-        var alreadyReversed = await db.StockAdjustments
-            .AnyAsync(x => x.OrderId == order.Id && x.Kind == "Reversal", ct);
-        if (alreadyReversed)
-            return adjustmentsByStockItem;
-
-        var consumptions = await db.StockAdjustments
-            .Where(x => x.OrderId == order.Id && x.Kind == "Consumption")
-            .ToListAsync(ct);
-        if (consumptions.Count == 0)
-            return adjustmentsByStockItem;
-
-        var stockItemIds = consumptions.Select(x => x.StockItemId).Distinct().ToArray();
-        var stockItems = await db.StockItems
-            .Where(x => stockItemIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, ct);
-
-        foreach (var consumption in consumptions)
-        {
-            if (!stockItems.TryGetValue(consumption.StockItemId, out var stockItem))
-                continue;
-
-            var before = stockItem.Quantity;
-            var restore = -consumption.Delta;
-            var after = before + restore;
-
-            var adjustment = new StockAdjustment
-            {
-                StockItemId = stockItem.Id,
-                Delta = restore,
-                QuantityBefore = before,
-                QuantityAfter = after,
-                Reason = $"Order #{order.OrderNumber} cancelled — reversal",
-                OrderId = order.Id,
-                Kind = "Reversal"
-            };
-            db.StockAdjustments.Add(adjustment);
-
-            if (!adjustmentsByStockItem.TryGetValue(stockItem.Id, out var list))
-                adjustmentsByStockItem[stockItem.Id] = list = new List<StockAdjustment>();
-            list.Add(adjustment);
-
-            stockItem.Quantity = after;
-            stockItem.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
-        return adjustmentsByStockItem;
-    }
-
-    public async Task<(CompleteOrderResult Result, OrderDto? Order)> CompleteExistingOrderAsync(
-        Guid tenantId, Guid orderId, string paymentMethod, decimal? amountTendered, CancellationToken ct)
-    {
-        var order = await db.Orders
-            .Include(x => x.Lines)
-            .SingleOrDefaultAsync(x => x.Id == orderId && x.TenantId == tenantId, ct);
-
-        if (order is null)
-            return (CompleteOrderResult.NotFound, null);
-
-        if (order.Status != "Sent")
-            return (CompleteOrderResult.NotAwaitingPayment, null);
-
-        var tendered = amountTendered ?? order.Total;
-        if (tendered < order.Total)
-            return (CompleteOrderResult.InsufficientTender, null);
-
-        order.Status = "Completed";
-        order.PaymentMethod = paymentMethod;
-        order.AmountTendered = tendered;
-        order.ChangeDue = tendered - order.Total;
-        order.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
-
-        await audit.LogAsync(
-            tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderCompleted",
-            summary: $"Order #{order.OrderNumber} payment completed via {paymentMethod}",
-            metadata: new { order.OrderNumber, paymentMethod, order.Total }, ct: ct);
-
-        return (CompleteOrderResult.Completed, ToDto(order));
-    }
-
-    public async Task<(SetStatusResult Result, OrderDto? Order)> SetStatusAsync(
-        Guid tenantId, Guid orderId, string status, CancellationToken ct)
-    {
-        var order = await db.Orders
-            .Include(x => x.Lines)
-            .SingleOrDefaultAsync(x => x.Id == orderId && x.TenantId == tenantId, ct);
-
-        if (order is null)
-            return (SetStatusResult.NotFound, null);
-
-        var wasAlreadyCancelled = order.Status == "Cancelled";
-        order.Status = status;
-        order.UpdatedAt = DateTimeOffset.UtcNow;
-
-        var stockAdjustments = status == "Cancelled" && !wasAlreadyCancelled
-            ? await ReverseConsumptionAsync(order, ct)
-            : new Dictionary<Guid, List<StockAdjustment>>();
-
-        await SaveChangesWithStockRetryAsync(stockAdjustments, ct);
-
-        if (status == "Cancelled" && !wasAlreadyCancelled)
-        {
-            await audit.LogAsync(
-                tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderVoided",
-                summary: $"Order #{order.OrderNumber} voided/cancelled",
-                metadata: new { order.OrderNumber, order.Total }, ct: ct);
-        }
-        else
-        {
-            await audit.LogAsync(
-                tenantId, current.UserId, order.LocationId, "Order", order.Id.ToString(), "OrderStatusChanged",
-                summary: $"Order #{order.OrderNumber} status set to {status}",
-                metadata: new { order.OrderNumber, status }, ct: ct);
-        }
-
-        return (SetStatusResult.Updated, ToDto(order));
-    }
-
-    public async Task<OrderDto?> GetOrderAsync(Guid tenantId, Guid orderId, CancellationToken ct)
-    {
-        var order = await db.Orders
+    private Task<Order?> LoadOrderAsync(Guid tenantId, Guid orderId, CancellationToken ct) =>
+        db.Orders
             .AsNoTracking()
-            .Include(x => x.Lines)
+            .Include(x => x.Table)
+            .Include(x => x.Rounds).ThenInclude(x => x.Lines)
             .SingleOrDefaultAsync(x => x.Id == orderId && x.TenantId == tenantId, ct);
 
-        return order is null ? null : ToDto(order);
-    }
-
-    public async Task<IReadOnlyList<OrderDto>> GetOrdersAsync(Guid tenantId, string? search, string? status, CancellationToken ct)
+    /// <summary>
+    /// Subtotal is the sum of every line on the order — every round, not just the one just
+    /// sent. VAT is charged on subtotal plus service charge, matching the arithmetic this
+    /// codebase already used before the reshape.
+    /// </summary>
+    private static void RecomputeTotals(Order order, Tenant tenant)
     {
-        var query = db.Orders
-            .AsNoTracking()
-            .Include(x => x.Lines)
-            .Where(x => x.TenantId == tenantId);
-
-        if (!string.IsNullOrWhiteSpace(status) && !status.Equals("All", StringComparison.OrdinalIgnoreCase))
-            query = query.Where(x => x.Status == status);
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim().ToLower();
-            query = query.Where(x =>
-                x.OrderNumber.ToString().Contains(term) ||
-                x.Lines.Any(l => l.Name.ToLower().Contains(term)));
-        }
-
-        var orders = await query
-            .OrderByDescending(x => x.CreatedAt)
-            .ToListAsync(ct);
-
-        return orders.Select(ToDto).ToArray();
+        var subtotal = order.Rounds.SelectMany(r => r.Lines).Sum(l => l.LineTotal);
+        order.Subtotal = subtotal;
+        order.ServiceCharge = Math.Round(subtotal * tenant.ServiceChargeRate, 2, MidpointRounding.AwayFromZero);
+        order.Tax = Math.Round((subtotal + order.ServiceCharge) * tenant.VatRate, 2, MidpointRounding.AwayFromZero);
+        order.Total = order.Subtotal + order.ServiceCharge + order.Tax;
     }
+
+    private static bool IsUniqueViolation(DbUpdateException ex, string constraintName) =>
+        ex.InnerException is PostgresException { SqlState: "23505" } pg && pg.ConstraintName == constraintName;
 
     private static OrderDto ToDto(Order order) => new(
         order.Id,
         order.OrderNumber,
-        order.ServiceMode,
+        order.TableId,
+        order.Table.Name,
+        order.CustomerName,
+        order.CustomerPhone,
+        order.GuestCount,
         order.Status,
-        order.PaymentMethod,
         order.Subtotal,
         order.ServiceCharge,
         order.Tax,
         order.Total,
         order.CurrencyCode,
         order.CurrencySymbol,
-        order.AmountTendered,
-        order.ChangeDue,
         order.CreatedAt,
-        order.Lines.Select(x => new OrderLineDto(x.Name, x.Quantity, x.Price, x.LineTotal, x.Notes)).ToArray());
+        order.ClosedAt,
+        order.Rounds
+            .OrderBy(r => r.RoundNumber)
+            .Select(r => new OrderRoundDto(
+                r.Id,
+                r.RoundNumber,
+                r.SentAt,
+                r.Lines.Sum(l => l.LineTotal),
+                // Lines print in the order the waiter added them, so a reprinted slip and
+                // the original read the same way; the database returns no order of its own.
+                r.Lines
+                    .OrderBy(l => l.CreatedAt).ThenBy(l => l.Id)
+                    .Select(l => new OrderLineDto(l.Name, l.Quantity, l.Price, l.LineTotal, l.Notes)).ToArray()))
+            .ToArray());
 }

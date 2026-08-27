@@ -18,20 +18,11 @@ public sealed class Tenant : EntityBase
     public string ReceiptFooterMessage { get; set; } = "Thank you for your visit!";
     public bool ReceiptShowTaxId { get; set; }
     public string? ReceiptTaxId { get; set; }
-    public bool ReceiptShowCollectionCode { get; set; } = true;
     public decimal VatRate { get; set; } = 0.10m;
     public decimal ServiceChargeRate { get; set; }
+    public string? PrinterIpAddress { get; set; }
+    public int PrinterPort { get; set; } = 9100;
     public ICollection<Location> Locations { get; set; } = new List<Location>();
-}
-
-public sealed class CurrencyRate : EntityBase
-{
-    public Guid TenantId { get; set; }
-    public Tenant Tenant { get; set; } = null!;
-    public string Code { get; set; } = string.Empty;
-    public string Symbol { get; set; } = string.Empty;
-    public decimal Rate { get; set; } = 1m;
-    public bool IsArchived { get; set; }
 }
 
 public sealed class Location : EntityBase
@@ -127,7 +118,6 @@ public sealed class Category : EntityBase
     public string Name { get; set; } = string.Empty;
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
-    public string? Station { get; set; }
     public ICollection<MenuItem> Items { get; set; } = new List<MenuItem>();
 }
 
@@ -151,21 +141,37 @@ public sealed class Order : EntityBase
     public Guid? LocationId { get; set; }
     public Location? Location { get; set; }
     public int OrderNumber { get; set; }
-    public string ServiceMode { get; set; } = string.Empty;
+    public Guid TableId { get; set; }
+    public RestaurantTable Table { get; set; } = null!;
+    public string CustomerName { get; set; } = string.Empty;
+    public string? CustomerPhone { get; set; }
+    public Guid? OpenedByUserId { get; set; }
+    public AppUser? OpenedByUser { get; set; }
+    public int? GuestCount { get; set; }
     public string Status { get; set; } = string.Empty;
-    public string? PaymentMethod { get; set; }
     public decimal Subtotal { get; set; }
     public decimal ServiceCharge { get; set; }
     public decimal Tax { get; set; }
     public decimal Total { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
     public string CurrencySymbol { get; set; } = string.Empty;
-    public decimal ExchangeRate { get; set; } = 1m;
-    public string BaseCurrencyCode { get; set; } = string.Empty;
-    public decimal BaseCurrencySubtotal { get; set; }
-    public decimal BaseCurrencyTotal { get; set; }
-    public decimal AmountTendered { get; set; }
-    public decimal ChangeDue { get; set; }
+    public DateTimeOffset? ClosedAt { get; set; }
+    public ICollection<OrderLine> Lines { get; set; } = new List<OrderLine>();
+    public ICollection<OrderRound> Rounds { get; set; } = new List<OrderRound>();
+}
+
+/// <summary>
+/// Id is client-supplied, never server-generated — this is the double-send guard. A
+/// retried "send round" call carries the same client-generated Id, so the retry's INSERT
+/// fails on the primary key and the round is recorded exactly once.
+/// </summary>
+public sealed class OrderRound
+{
+    public Guid Id { get; set; }
+    public Guid OrderId { get; set; }
+    public Order Order { get; set; } = null!;
+    public int RoundNumber { get; set; }
+    public DateTimeOffset SentAt { get; set; }
     public ICollection<OrderLine> Lines { get; set; } = new List<OrderLine>();
 }
 
@@ -186,6 +192,8 @@ public sealed class OrderLine : EntityBase
 {
     public Guid OrderId { get; set; }
     public Order Order { get; set; } = null!;
+    public Guid RoundId { get; set; }
+    public OrderRound Round { get; set; } = null!;
     public Guid MenuItemId { get; set; }
     public MenuItem MenuItem { get; set; } = null!;
     public string Name { get; set; } = string.Empty;
@@ -193,61 +201,6 @@ public sealed class OrderLine : EntityBase
     public int Quantity { get; set; }
     public decimal LineTotal { get; set; }
     public string? Notes { get; set; }
-}
-
-public sealed class StockItem : EntityBase
-{
-    public Guid TenantId { get; set; }
-    public Tenant Tenant { get; set; } = null!;
-    public string Name { get; set; } = string.Empty;
-    public string Sku { get; set; } = string.Empty;
-    public string Unit { get; set; } = string.Empty;
-    public decimal Quantity { get; set; }
-    public decimal ParLevel { get; set; }
-    public decimal ReorderLevel { get; set; }
-    public decimal Cost { get; set; }
-    public bool IsArchived { get; set; }
-    public string RecipeUnit { get; set; } = string.Empty;
-    public decimal ConversionFactor { get; set; } = 1;
-    public ICollection<StockAdjustment> Adjustments { get; set; } = new List<StockAdjustment>();
-
-    /// <summary>
-    /// Postgres system column mapped as an EF Core concurrency token (see AppDbContext:
-    /// IsRowVersion()). Every UPDATE to this row implicitly checks xmin, so a stale
-    /// read-modify-write on Quantity throws DbUpdateConcurrencyException instead of
-    /// silently overwriting a concurrent decrement.
-    /// </summary>
-    public uint RowVersion { get; set; }
-}
-
-public sealed class StockAdjustment : EntityBase
-{
-    public Guid StockItemId { get; set; }
-    public StockItem StockItem { get; set; } = null!;
-    public decimal Delta { get; set; }
-    public decimal QuantityBefore { get; set; }
-    public decimal QuantityAfter { get; set; }
-    public string Reason { get; set; } = string.Empty;
-    public Guid? OrderId { get; set; }
-    public string Kind { get; set; } = "Manual";
-}
-
-public sealed class Recipe : EntityBase
-{
-    public Guid MenuItemId { get; set; }
-    public MenuItem MenuItem { get; set; } = null!;
-    public int Yield { get; set; } = 1;
-    public ICollection<RecipeIngredient> Lines { get; set; } = new List<RecipeIngredient>();
-}
-
-public sealed class RecipeIngredient : EntityBase
-{
-    public Guid RecipeId { get; set; }
-    public Recipe Recipe { get; set; } = null!;
-    public Guid StockItemId { get; set; }
-    public StockItem StockItem { get; set; } = null!;
-    public decimal Quantity { get; set; }
-    public string Unit { get; set; } = string.Empty;
 }
 
 public sealed class RestaurantTable : EntityBase

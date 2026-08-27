@@ -19,7 +19,7 @@ type Session = {
 type AuthContextValue = {
   session: Session | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<string[]>
   logout: () => void
 }
 
@@ -65,6 +65,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       defaultLocation: result.data.defaultLocation,
       roles: result.data.roles,
     })
+
+    return result.data.roles
   }
 
   const logout = () => {

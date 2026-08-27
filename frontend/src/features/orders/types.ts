@@ -6,26 +6,36 @@ export type OrderLine = {
   notes: string | null
 }
 
-export const ORDER_STATUSES = ['Open', 'Sent', 'Preparing', 'Ready', 'Completed', 'Cancelled'] as const
+export type OrderRound = {
+  id: string
+  roundNumber: number
+  sentAt: string
+  roundTotal: number
+  lines: OrderLine[]
+}
+
+export const ORDER_STATUSES = ['Open', 'Closed', 'Cancelled'] as const
 
 export type OrderStatus = typeof ORDER_STATUSES[number]
 
 export type Order = {
   id: string
   orderNumber: number
-  serviceMode: string
+  tableId: string
+  tableName: string
+  customerName: string
+  customerPhone: string | null
+  guestCount: number | null
   status: OrderStatus
-  paymentMethod: string | null
   subtotal: number
   serviceCharge: number
   tax: number
   total: number
   currencyCode: string
   currencySymbol: string
-  amountTendered: number
-  changeDue: number
   createdAt: string
-  lines: OrderLine[]
+  closedAt: string | null
+  rounds: OrderRound[]
 }
 
 export type OrderLineRequest = {

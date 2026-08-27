@@ -10,6 +10,33 @@ services:
       - "5432:5432"
     volumes:
       - zipflow_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-zipflow} -d ${POSTGRES_DB:-ZipFlow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: backend/ZipFlow.Api
+      dockerfile: Dockerfile
+    container_name: zipflow-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Host must be the compose service name — containers do not share a network
+      # namespace, so "localhost" here would point the API at itself.
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-ZipFlow};Username=${POSTGRES_USER:-zipflow};Password=${POSTGRES_PASSWORD:-ChangeThisLocalPassword!1}"
+      Jwt__Issuer: "ZipFlow"
+      Jwt__Audience: "ZipFlow.Clients"
+      Jwt__SigningKey: "${JWT_SIGNING_KEY}"
+      Jwt__AccessTokenMinutes: "15"
+      Jwt__RefreshTokenDays: "30"
+      Cors__AllowedOrigins__0: "${CORS_ALLOWED_ORIGIN}"
+    ports:
+      - "8080:8080"
     restart: unless-stopped
 
 volumes:

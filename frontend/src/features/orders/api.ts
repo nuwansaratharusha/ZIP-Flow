@@ -1,31 +1,42 @@
 import { apiRequest, type ApiEnvelope } from '../../lib/api'
-import type { Order, OrderLineRequest, OrderStatus } from './types'
+import type { Order, OrderLineRequest } from './types'
 
-export function sendToKitchen(serviceMode: string, lines: OrderLineRequest[], currencyCode?: string, id?: string) {
-  return apiRequest<ApiEnvelope<Order>>('/api/orders/send-to-kitchen', {
+export function openOrder(tableId: string, customerName: string, customerPhone?: string, id?: string) {
+  return apiRequest<ApiEnvelope<Order>>('/api/orders', {
     method: 'POST',
-    body: JSON.stringify({ serviceMode, currencyCode, lines, id }),
+    body: JSON.stringify({ id, tableId, customerName, customerPhone }),
   }).then((res) => res.data)
 }
 
-export function completeOrder(orderId: string, paymentMethod: string, amountTendered?: number) {
-  return apiRequest<ApiEnvelope<Order>>(`/api/orders/${orderId}/complete`, {
+export function sendRound(orderId: string, lines: OrderLineRequest[], id?: string) {
+  return apiRequest<ApiEnvelope<Order>>(`/api/orders/${orderId}/rounds`, {
     method: 'POST',
-    body: JSON.stringify({ paymentMethod, amountTendered }),
+    body: JSON.stringify({ id, lines }),
   }).then((res) => res.data)
 }
 
-export function createCompletedOrder(
-  serviceMode: string,
-  paymentMethod: string,
-  lines: OrderLineRequest[],
-  currencyCode?: string,
-  amountTendered?: number
-) {
-  return apiRequest<ApiEnvelope<Order>>('/api/orders/complete-payment', {
+export function closeOrder(orderId: string) {
+  return apiRequest<ApiEnvelope<Order>>(`/api/orders/${orderId}/close`, {
     method: 'POST',
-    body: JSON.stringify({ serviceMode, paymentMethod, currencyCode, amountTendered, lines }),
   }).then((res) => res.data)
+}
+
+export function cancelOrder(orderId: string) {
+  return apiRequest<ApiEnvelope<Order>>(`/api/orders/${orderId}/cancel`, {
+    method: 'POST',
+  }).then((res) => res.data)
+}
+
+export function printRound(orderId: string, roundNumber: number) {
+  return apiRequest<ApiEnvelope<object>>(`/api/orders/${orderId}/rounds/${roundNumber}/print`, {
+    method: 'POST',
+  }).then(() => undefined)
+}
+
+export function printBill(orderId: string) {
+  return apiRequest<ApiEnvelope<object>>(`/api/orders/${orderId}/bill/print`, {
+    method: 'POST',
+  }).then(() => undefined)
 }
 
 export function getOrders(filters?: { search?: string; status?: string }) {
@@ -38,11 +49,4 @@ export function getOrders(filters?: { search?: string; status?: string }) {
 
 export function getOrder(id: string) {
   return apiRequest<ApiEnvelope<Order>>(`/api/orders/${id}`).then((res) => res.data)
-}
-
-export function setOrderStatus(id: string, status: OrderStatus) {
-  return apiRequest<ApiEnvelope<Order>>(`/api/orders/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  }).then((res) => res.data)
 }

@@ -1,0 +1,24 @@
+/* Order print page (round slip + bill) — namespaced additions on top of the
+   shared .receipt-* classes in app.css. Thermal-printer output: narrow,
+   monospaced-feeling, high contrast, no colour dependence. */
+
+.print-round-heading {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin: 0 0 8px;
+}
+
+.print-bill-round {
+  margin-bottom: 4px;
+}
+
+.print-bill-round-total {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 6px 0 0;
+}

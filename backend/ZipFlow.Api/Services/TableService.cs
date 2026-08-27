@@ -4,7 +4,7 @@ using ZipFlow.Api.Domain;
 
 namespace ZipFlow.Api.Services;
 
-public sealed record TableDto(Guid Id, string Name, string Section, int Capacity, string Status, bool IsArchived);
+public sealed record TableDto(Guid Id, string Name, string Section, int Capacity, string Status, bool IsArchived, Guid? OpenOrderId, string? OpenOrderCustomerName);
 
 public enum SaveTableResult
 {
@@ -42,11 +42,21 @@ public sealed class TableService(AppDbContext db) : ITableService
 
     public async Task<IReadOnlyList<TableDto>> GetTablesAsync(Guid tenantId, CancellationToken ct)
     {
+        // Single projection per table is safe: a partial unique index on pos.Order(TableId)
+        // WHERE Status = 'Open' guarantees at most one open order per table.
         return await db.RestaurantTables
             .AsNoTracking()
             .Where(x => x.TenantId == tenantId && !x.IsArchived)
             .OrderBy(x => x.Section).ThenBy(x => x.Name)
-            .Select(x => ToDto(x))
+            .Select(x => new TableDto(
+                x.Id,
+                x.Name,
+                x.Section,
+                x.Capacity,
+                x.Status,
+                x.IsArchived,
+                db.Orders.Where(o => o.TableId == x.Id && o.TenantId == tenantId && o.Status == "Open").Select(o => (Guid?)o.Id).FirstOrDefault(),
+                db.Orders.Where(o => o.TableId == x.Id && o.TenantId == tenantId && o.Status == "Open").Select(o => o.CustomerName).FirstOrDefault()))
             .ToListAsync(ct);
     }
 
@@ -129,5 +139,5 @@ public sealed class TableService(AppDbContext db) : ITableService
     }
 
     private static TableDto ToDto(RestaurantTable table) =>
-        new(table.Id, table.Name, table.Section, table.Capacity, table.Status, table.IsArchived);
+        new(table.Id, table.Name, table.Section, table.Capacity, table.Status, table.IsArchived, null, null);
 }

@@ -4,17 +4,14 @@ import { useAuth } from '../features/auth/AuthContext'
 import { Icon, type IconName } from './Icon'
 
 const nav: { label: string; path: string; icon: IconName }[] = [
-  { label: 'Overview', path: '/', icon: 'home' },
-  { label: 'Tables', path: '/tables', icon: 'grid' },
-  { label: 'POS', path: '/pos', icon: 'pos' },
-  { label: 'Orders', path: '/orders', icon: 'orders' },
-  { label: 'Menu', path: '/menu', icon: 'menu' },
+  { label: 'Tables', path: '/waiter/tables', icon: 'grid' },
+  { label: 'POS', path: '/waiter/pos', icon: 'pos' },
 ]
 
-export function AppShell() {
+export function WaiterShell() {
   const { session, logout } = useAuth()
   const location = useLocation()
-  const isPos = location.pathname.startsWith('/pos/')
+  const isPos = location.pathname.startsWith('/waiter/pos/')
   const [time, setTime] = useState(() => new Date())
 
   useEffect(() => {
@@ -28,12 +25,10 @@ export function AppShell() {
 
   return (
     <div className={`app-shell ${isPos ? 'pos-mode' : ''}`}>
-      {/* Slim Dark Navigation Rail (Theme matching Screenshot 2) */}
       <aside className="icon-rail" aria-label="Primary Navigation">
         <div className="rail-top">
           {nav.map((item) => (
             <NavLink
-              end={item.path === '/'}
               key={item.path}
               to={item.path}
               className={({ isActive }) => `rail-item ${isActive ? 'active-accent' : ''}`}
@@ -47,30 +42,6 @@ export function AppShell() {
               )}
             </NavLink>
           ))}
-        </div>
-
-        <div className="rail-bottom">
-          <NavLink
-            to="/settings"
-            className={({ isActive }) => `rail-item ${isActive ? 'active-accent' : ''}`}
-            title="Settings & System Preferences"
-          >
-            {({ isActive }) => (
-              <>
-                <Icon name="settings" size={22} filled={isActive} />
-                <span className="rail-tooltip">Settings</span>
-              </>
-            )}
-          </NavLink>
-          <button
-            type="button"
-            className="rail-item"
-            title="Help Center"
-            onClick={() => alert('ZIP Flow Restaurant OS')}
-          >
-            <Icon name="helpCircle" size={22} />
-            <span className="rail-tooltip">Help</span>
-          </button>
         </div>
       </aside>
 
@@ -88,7 +59,7 @@ export function AppShell() {
               />
               <div className="brand-title-group">
                 <strong className="brand-logo-text">{tenantName}</strong>
-                <span className="brand-sub-badge">Restaurant OS</span>
+                <span className="brand-sub-badge">Waiter</span>
               </div>
             </div>
           </div>
