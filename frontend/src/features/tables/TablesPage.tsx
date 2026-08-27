@@ -3,12 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import { archiveTable, createTable, getTables, updateTable } from './api'
 import { openOrder } from '../orders/api'
 import { TABLE_SECTIONS, type RestaurantTable } from './types'
+import { useAuth } from '../auth/AuthContext'
+import { isWaiterOnly } from '../auth/roles'
 import '../../styles/tables.css'
 
 type EditDraft = { name: string; section: string; capacity: string }
 
 export function TablesPage() {
   const navigate = useNavigate()
+  const { session } = useAuth()
+  const canManageTables = !isWaiterOnly(session?.roles)
 
   const [tables, setTables] = useState<RestaurantTable[]>([])
   const [loading, setLoading] = useState(true)
@@ -169,14 +173,16 @@ export function TablesPage() {
           <h1>Tables</h1>
           <p className="muted">Tap an available table to seat a customer, or an occupied table to resume its order.</p>
         </div>
-        <button
-          type="button"
-          className="secondary-button"
-          aria-pressed={manageOpen}
-          onClick={() => setManageOpen((prev) => !prev)}
-        >
-          {manageOpen ? 'Done managing' : 'Manage'}
-        </button>
+        {canManageTables && (
+          <button
+            type="button"
+            className="secondary-button"
+            aria-pressed={manageOpen}
+            onClick={() => setManageOpen((prev) => !prev)}
+          >
+            {manageOpen ? 'Done managing' : 'Manage'}
+          </button>
+        )}
       </div>
 
       {loadError && <div className="alert error">{loadError}</div>}
