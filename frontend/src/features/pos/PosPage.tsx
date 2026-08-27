@@ -5,7 +5,7 @@ import { formatMoney } from '../../lib/currency'
 import '../../styles/pos.css'
 import { getCatalog } from '../menu/api'
 import type { Catalog, MenuItem } from '../menu/types'
-import { cancelOrder, closeOrder, getOrder, sendRound } from '../orders/api'
+import { cancelOrder, closeOrder, getOrder, printBill, printRound, sendRound } from '../orders/api'
 import type { Order, OrderLineRequest } from '../orders/types'
 import { getTaxSettings } from '../settings/api'
 
@@ -52,6 +52,8 @@ export function PosPage() {
 
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
+
+  const [printNotice, setPrintNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   // Client-generated id for the in-flight "send round" call. Generated once
   // when the waiter first taps Send round, held across any retry so a
@@ -148,6 +150,7 @@ export function PosPage() {
 
     setSending(true)
     setSendError('')
+    setPrintNotice(null)
     try {
       const lines: OrderLineRequest[] = roundLines.map((line) => ({
         menuItemId: line.menuItemId,
@@ -159,7 +162,13 @@ export function PosPage() {
       pendingRoundId.current = null
       setOrder(updated)
       setRoundLines([])
-      navigate(`/print/orders/${orderId}/round/${latestRoundNumber}`)
+
+      try {
+        await printRound(orderId, latestRoundNumber)
+        setPrintNotice({ type: 'success', message: 'Sent to counter' })
+      } catch {
+        setPrintNotice({ type: 'error', message: 'Printer offline, tell the counter' })
+      }
     } catch (err) {
       setSendError(
         err instanceof Error
@@ -175,11 +184,20 @@ export function PosPage() {
     if (!orderId || closing || roundLines.length > 0) return
     setClosing(true)
     setCloseError('')
+    setPrintNotice(null)
     try {
-      await closeOrder(orderId)
-      navigate(`/print/orders/${orderId}/bill`)
+      const updated = await closeOrder(orderId)
+      setOrder(updated)
+
+      try {
+        await printBill(orderId)
+        setPrintNotice({ type: 'success', message: 'Sent to counter' })
+      } catch {
+        setPrintNotice({ type: 'error', message: 'Printer offline, tell the counter' })
+      }
     } catch (err) {
       setCloseError(err instanceof Error ? err.message : 'Failed to close order.')
+    } finally {
       setClosing(false)
     }
   }
@@ -228,6 +246,10 @@ export function PosPage() {
         <p className="muted posx-status-line">
           This order is <strong>{order.status}</strong> and can no longer be changed.
         </p>
+
+        {printNotice && (
+          <div className={`alert ${printNotice.type === 'success' ? 'success' : 'error'}`}>{printNotice.message}</div>
+        )}
 
         <div className="section-card posx-readonly-rounds">
           <div className="section-heading">
@@ -396,6 +418,9 @@ export function PosPage() {
         {sendError && <div className="alert error posx-inline-alert">{sendError}</div>}
         {closeError && <div className="alert error posx-inline-alert">{closeError}</div>}
         {cancelError && <div className="alert error posx-inline-alert">{cancelError}</div>}
+        {printNotice && (
+          <div className={`alert ${printNotice.type === 'success' ? 'success' : 'error'}`}>{printNotice.message}</div>
+        )}
         {roundLines.length > 0 && (
           <div className="posx-unsent-warning">
             <Icon name="clock" /> Unsent round — send it before closing, or these items will be lost.
