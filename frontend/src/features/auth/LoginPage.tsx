@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { Icon } from '../../components/Icon'
 import { useAuth } from './AuthContext'
+import { isWaiterOnly } from './roles'
 
 export function LoginPage() {
   const { session, login } = useAuth()
@@ -20,8 +21,19 @@ export function LoginPage() {
     setSubmitting(true)
 
     try {
-      await login(email, password)
-      const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/'
+      const roles = await login(email, password)
+      const requestedFrom = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+      // A `from` remembered before this login (e.g. a prior session's redirect,
+      // or a role switch on the same tab) can point at a shell that no longer
+      // fits the account that just signed in. Waiter sessions are always safe
+      // to send anywhere they asked to go — WaiterOnlyGuard bounces them back
+      // to /waiter/tables if it doesn't fit. Non-waiter sessions landing on a
+      // stale /waiter/* path aren't guarded away from it (previewing the
+      // waiter shell is allowed), so a leftover /waiter/* `from` would strand
+      // them there looking like the wrong account signed in.
+      const from = isWaiterOnly(roles) || !requestedFrom?.startsWith('/waiter')
+        ? requestedFrom ?? '/'
+        : '/'
       navigate(from, { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed.')
