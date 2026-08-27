@@ -8,6 +8,8 @@ public sealed record ReceiptSettingsDto(
 
 public sealed record TaxSettingsDto(decimal VatRatePercent, decimal ServiceChargeRatePercent);
 
+public sealed record PrinterSettingsDto(string? IpAddress, int Port);
+
 public interface ISettingsService
 {
     Task<ReceiptSettingsDto?> GetReceiptSettingsAsync(Guid tenantId, CancellationToken ct);
@@ -19,6 +21,11 @@ public interface ISettingsService
 
     Task<(bool Success, string? Error, TaxSettingsDto? Result)> UpdateTaxSettingsAsync(
         Guid tenantId, decimal vatRatePercent, decimal serviceChargeRatePercent, CancellationToken ct);
+
+    Task<PrinterSettingsDto?> GetPrinterSettingsAsync(Guid tenantId, CancellationToken ct);
+
+    Task<(bool Success, string? Error, PrinterSettingsDto? Result)> UpdatePrinterSettingsAsync(
+        Guid tenantId, string? ipAddress, int port, CancellationToken ct);
 }
 
 public sealed class SettingsService(AppDbContext db) : ISettingsService
@@ -73,5 +80,29 @@ public sealed class SettingsService(AppDbContext db) : ISettingsService
         await db.SaveChangesAsync(ct);
 
         return (true, null, new TaxSettingsDto(tenant.VatRate * 100, tenant.ServiceChargeRate * 100));
+    }
+
+    public async Task<PrinterSettingsDto?> GetPrinterSettingsAsync(Guid tenantId, CancellationToken ct)
+    {
+        var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tenantId, ct);
+        return tenant is null ? null : new PrinterSettingsDto(tenant.PrinterIpAddress, tenant.PrinterPort);
+    }
+
+    public async Task<(bool Success, string? Error, PrinterSettingsDto? Result)> UpdatePrinterSettingsAsync(
+        Guid tenantId, string? ipAddress, int port, CancellationToken ct)
+    {
+        if (port < 1 || port > 65535)
+            return (false, "Port must be between 1 and 65535.", null);
+
+        var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Id == tenantId, ct);
+        if (tenant is null)
+            return (false, "Tenant not found.", null);
+
+        tenant.PrinterIpAddress = string.IsNullOrWhiteSpace(ipAddress) ? null : ipAddress.Trim();
+        tenant.PrinterPort = port;
+        tenant.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        return (true, null, new PrinterSettingsDto(tenant.PrinterIpAddress, tenant.PrinterPort));
     }
 }
