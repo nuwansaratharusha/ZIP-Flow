@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Sockets;
 using System.Text;
 
@@ -9,7 +10,7 @@ public interface IEscPosPrintService
 {
     Task PrintRoundTicketAsync(
         string ipAddress, int port, string businessName, int orderNumber, string tableName,
-        string customerName, OrderRoundDto round, string currencySymbol, CancellationToken ct);
+        string customerName, OrderRoundDto round, string currencyCode, CancellationToken ct);
 
     Task PrintBillAsync(
         string ipAddress, int port, string businessName, string footerMessage, OrderDto order, CancellationToken ct);
@@ -30,7 +31,7 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
 
     public Task PrintRoundTicketAsync(
         string ipAddress, int port, string businessName, int orderNumber, string tableName,
-        string customerName, OrderRoundDto round, string currencySymbol, CancellationToken ct)
+        string customerName, OrderRoundDto round, string currencyCode, CancellationToken ct)
     {
         var lines = new List<string>
         {
@@ -49,7 +50,7 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
         }
 
         lines.Add(Divider);
-        lines.Add($"Round total: {currencySymbol}{round.RoundTotal:0.00}");
+        lines.Add($"Round total: {currencyCode} {round.RoundTotal:0.00}");
 
         return SendAsync(ipAddress, port, lines, ct);
     }
@@ -69,15 +70,15 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
         {
             lines.Add($"Round {round.RoundNumber}");
             foreach (var line in round.Lines)
-                lines.Add($"  {line.Quantity}x {line.Name} - {order.CurrencySymbol}{line.LineTotal:0.00}");
+                lines.Add($"  {line.Quantity}x {line.Name} - {order.CurrencyCode} {line.LineTotal:0.00}");
         }
 
         lines.Add(Divider);
-        lines.Add($"Subtotal: {order.CurrencySymbol}{order.Subtotal:0.00}");
+        lines.Add($"Subtotal: {order.CurrencyCode} {order.Subtotal:0.00}");
         if (order.ServiceCharge > 0)
-            lines.Add($"Service charge: {order.CurrencySymbol}{order.ServiceCharge:0.00}");
-        lines.Add($"Tax: {order.CurrencySymbol}{order.Tax:0.00}");
-        lines.Add($"Total: {order.CurrencySymbol}{order.Total:0.00}");
+            lines.Add($"Service charge: {order.CurrencyCode} {order.ServiceCharge:0.00}");
+        lines.Add($"Tax: {order.CurrencyCode} {order.Tax:0.00}");
+        lines.Add($"Total: {order.CurrencyCode} {order.Total:0.00}");
         lines.Add(footerMessage);
 
         return SendAsync(ipAddress, port, lines, ct);
@@ -99,7 +100,7 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
             using var stream = client.GetStream();
             await stream.WriteAsync(payload.ToArray(), ct);
         }
-        catch (Exception ex) when (ex is SocketException or TimeoutException)
+        catch (Exception ex) when (ex is SocketException or TimeoutException or IOException)
         {
             logger.LogWarning(ex, "Failed to reach printer at {IpAddress}:{Port}", ipAddress, port);
             throw new PrinterUnavailableException($"Could not reach printer at {ipAddress}:{port}.");

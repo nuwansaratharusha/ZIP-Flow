@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Icon } from '../../components/Icon'
 import { formatMoney } from '../../lib/currency'
 import '../../styles/pos.css'
@@ -31,6 +31,8 @@ function monogram(name: string) {
 export function PosPage() {
   const { orderId } = useParams<{ orderId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const tablesBase = location.pathname.startsWith('/waiter') ? '/waiter/tables' : '/tables'
 
   const [order, setOrder] = useState<Order | null>(null)
   const [catalog, setCatalog] = useState<Catalog>({ categories: [], items: [] })
@@ -166,8 +168,11 @@ export function PosPage() {
       try {
         await printRound(orderId, latestRoundNumber)
         setPrintNotice({ type: 'success', message: 'Sent to counter' })
-      } catch {
-        setPrintNotice({ type: 'error', message: 'Printer offline, tell the counter' })
+      } catch (err) {
+        setPrintNotice({
+          type: 'error',
+          message: err instanceof Error ? err.message : 'Printer offline, tell the counter',
+        })
       }
     } catch (err) {
       setSendError(
@@ -192,8 +197,11 @@ export function PosPage() {
       try {
         await printBill(orderId)
         setPrintNotice({ type: 'success', message: 'Sent to counter' })
-      } catch {
-        setPrintNotice({ type: 'error', message: 'Printer offline, tell the counter' })
+      } catch (err) {
+        setPrintNotice({
+          type: 'error',
+          message: err instanceof Error ? err.message : 'Printer offline, tell the counter',
+        })
       }
     } catch (err) {
       setCloseError(err instanceof Error ? err.message : 'Failed to close order.')
@@ -210,7 +218,7 @@ export function PosPage() {
     setCancelError('')
     try {
       await cancelOrder(orderId)
-      navigate('/tables')
+      navigate(tablesBase)
     } catch (err) {
       setCancelError(err instanceof Error ? err.message : 'Failed to cancel order.')
       setCancelling(false)
@@ -230,7 +238,7 @@ export function PosPage() {
       <main className="content">
         <div className="alert error">{loadError || 'Order not found.'}</div>
         <p style={{ marginTop: 14 }}>
-          <Link to="/tables" className="secondary-button">
+          <Link to={tablesBase} className="secondary-button">
             <Icon name="arrowLeft" /> Back to tables
           </Link>
         </p>
@@ -289,7 +297,7 @@ export function PosPage() {
         </div>
 
         <p style={{ marginTop: 14 }}>
-          <Link to="/tables" className="secondary-button">
+          <Link to={tablesBase} className="secondary-button">
             <Icon name="arrowLeft" /> Back to tables
           </Link>
         </p>

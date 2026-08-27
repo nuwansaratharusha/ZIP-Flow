@@ -106,7 +106,7 @@ public static class OrderEndpoints
             {
                 await printer.PrintRoundTicketAsync(
                     printerSettings.IpAddress, printerSettings.Port, receipt!.BusinessName,
-                    order.OrderNumber, order.TableName, order.CustomerName, round, order.CurrencySymbol, ct);
+                    order.OrderNumber, order.TableName, order.CustomerName, round, order.CurrencyCode, ct);
             }
             catch (PrinterUnavailableException ex)
             {

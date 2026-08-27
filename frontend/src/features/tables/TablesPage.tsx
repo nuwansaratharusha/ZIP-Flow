@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { archiveTable, createTable, getTables, updateTable } from './api'
 import { openOrder } from '../orders/api'
 import { TABLE_SECTIONS, type RestaurantTable } from './types'
@@ -11,6 +11,8 @@ type EditDraft = { name: string; section: string; capacity: string }
 
 export function TablesPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const posBase = location.pathname.startsWith('/waiter') ? '/waiter/pos' : '/pos'
   const { session } = useAuth()
   const canManageTables = !isWaiterOnly(session?.roles)
 
@@ -111,7 +113,7 @@ export function TablesPage() {
 
   const handleTableTap = (table: RestaurantTable) => {
     if (table.status === 'occupied' && table.openOrderId) {
-      navigate(`/pos/${table.openOrderId}`)
+      navigate(`${posBase}/${table.openOrderId}`)
       return
     }
     // available and reserved (no flow yet) both open the "start service" dialog
@@ -148,7 +150,7 @@ export function TablesPage() {
       )
       pendingOrderIdRef.current = null
       closeOpenDialog()
-      navigate(`/pos/${order.id}`)
+      navigate(`${posBase}/${order.id}`)
     } catch (err) {
       setOpenError(err instanceof Error ? err.message : 'Failed to open table.')
       await refetch().catch(() => undefined)

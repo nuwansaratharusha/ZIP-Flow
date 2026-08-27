@@ -94,11 +94,15 @@ public sealed class SettingsService(AppDbContext db) : ISettingsService
         if (port < 1 || port > 65535)
             return (false, "Port must be between 1 and 65535.", null);
 
+        var trimmedIpAddress = string.IsNullOrWhiteSpace(ipAddress) ? null : ipAddress.Trim();
+        if (trimmedIpAddress is not null && !System.Net.IPAddress.TryParse(trimmedIpAddress, out _))
+            return (false, "Enter a valid IP address.", null);
+
         var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Id == tenantId, ct);
         if (tenant is null)
             return (false, "Tenant not found.", null);
 
-        tenant.PrinterIpAddress = string.IsNullOrWhiteSpace(ipAddress) ? null : ipAddress.Trim();
+        tenant.PrinterIpAddress = trimmedIpAddress;
         tenant.PrinterPort = port;
         tenant.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
