@@ -29,6 +29,15 @@ public static class MenuEndpoints
         })
         .RequireAuthorization("permission:menu.categories.manage");
 
+        group.MapDelete("/categories/{id:guid}", async (Guid id, ICurrentRequestContext current, IMenuService menu, CancellationToken ct) =>
+        {
+            var (success, error) = await menu.DeleteCategoryAsync(current.TenantId, id, ct);
+            return success
+                ? Results.Ok(ApiResponse<object>.Ok(new { deleted = true }))
+                : Results.BadRequest(ApiResponse<object>.Fail(error ?? "Unable to delete category."));
+        })
+        .RequireAuthorization("permission:menu.categories.manage");
+
         group.MapGet("/items", async (ICurrentRequestContext current, IMenuService menu, CancellationToken ct) =>
             Results.Ok(ApiResponse<IReadOnlyList<MenuItemDto>>.Ok(await menu.GetItemsAsync(current.TenantId, ct))))
             .RequireAuthorization("permission:menu.items.view");

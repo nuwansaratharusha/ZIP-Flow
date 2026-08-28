@@ -1,36 +1,52 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { getPrinterSettings, getReceiptSettings, getTaxSettings, updatePrinterSettings, updateReceiptSettings, updateTaxSettings } from './api'
+import { Icon } from '../../components/Icon'
+import { useToast } from '../../components/Toast'
+import { useAuth } from '../auth/AuthContext'
+import {
+  getPrinterSettings,
+  getReceiptSettings,
+  getTaxSettings,
+  updatePrinterSettings,
+  updateReceiptSettings,
+  updateTaxSettings,
+} from './api'
+
+type SettingsTab = 'receipt' | 'taxes' | 'printer'
 
 export function SettingsPage() {
+  const { session } = useAuth()
+  const toast = useToast()
+  const currencySymbol = session?.tenant.currencySymbol ?? '£'
+
+  const [activeTab, setActiveTab] = useState<SettingsTab>('receipt')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
+  // Receipt Settings
   const [businessName, setBusinessName] = useState('')
   const [footerMessage, setFooterMessage] = useState('')
   const [showTaxId, setShowTaxId] = useState(false)
   const [taxId, setTaxId] = useState('')
+  const [savingReceipt, setSavingReceipt] = useState(false)
+  const [receiptError, setReceiptError] = useState('')
 
-  const [saveError, setSaveError] = useState('')
-  const [saved, setSaved] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  const [vatRate, setVatRate] = useState('')
-  const [serviceChargeRate, setServiceChargeRate] = useState('')
-  const [taxSaving, setTaxSaving] = useState(false)
+  // Tax Settings
+  const [vatRate, setVatRate] = useState('20')
+  const [serviceChargeRate, setServiceChargeRate] = useState('10')
+  const [savingTaxes, setSavingTaxes] = useState(false)
   const [taxError, setTaxError] = useState('')
-  const [taxSaved, setTaxSaved] = useState(false)
 
+  // Printer Settings
   const [printerIp, setPrinterIp] = useState('')
   const [printerPort, setPrinterPort] = useState('9100')
-  const [printerSaving, setPrinterSaving] = useState(false)
+  const [savingPrinter, setSavingPrinter] = useState(false)
   const [printerError, setPrinterError] = useState('')
-  const [printerSaved, setPrinterSaved] = useState(false)
 
   useEffect(() => {
     Promise.all([getReceiptSettings(), getTaxSettings(), getPrinterSettings()])
       .then(([receipt, tax, printer]) => {
-        setBusinessName(receipt.businessName)
-        setFooterMessage(receipt.footerMessage)
+        setBusinessName(receipt.businessName || session?.tenant.name || '')
+        setFooterMessage(receipt.footerMessage || 'Thank you for dining with us!')
         setShowTaxId(receipt.showTaxId)
         setTaxId(receipt.taxId ?? '')
         setVatRate(String(tax.vatRatePercent))
@@ -40,16 +56,18 @@ export function SettingsPage() {
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load settings.'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [session?.tenant.name])
 
-  const submit = async (event: FormEvent) => {
+  const submitReceipt = async (event: FormEvent) => {
     event.preventDefault()
-    setSaveError('')
-    setSaved(false)
+    setReceiptError('')
 
-    if (showTaxId && !taxId.trim()) return setSaveError('Enter a tax ID, or turn off "Show tax ID on receipt".')
+    if (showTaxId && !taxId.trim()) {
+      setReceiptError('Enter a tax ID, or uncheck "Show tax ID on receipt".')
+      return
+    }
 
-    setSaving(true)
+    setSavingReceipt(true)
     try {
       const updated = await updateReceiptSettings({
         businessName: businessName.trim() || null,
@@ -57,170 +75,445 @@ export function SettingsPage() {
         showTaxId,
         taxId: taxId.trim() || null,
       })
-      setBusinessName(updated.businessName)
+      setBusinessName(updated.businessName || '')
       setFooterMessage(updated.footerMessage)
       setTaxId(updated.taxId ?? '')
-      setSaved(true)
+      toast.success('Receipt branding settings saved successfully.')
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to save settings.')
+      setReceiptError(err instanceof Error ? err.message : 'Failed to save receipt settings.')
+      toast.error('Failed to save receipt settings.')
     } finally {
-      setSaving(false)
+      setSavingReceipt(false)
     }
   }
 
-  const saveTaxSettings = async (event: FormEvent) => {
+  const submitTaxes = async (event: FormEvent) => {
     event.preventDefault()
     setTaxError('')
-    setTaxSaved(false)
 
     const vat = Number(vatRate)
     const serviceCharge = Number(serviceChargeRate)
-    if (!(vat >= 0 && vat <= 100)) return setTaxError('VAT rate must be between 0 and 100.')
-    if (!(serviceCharge >= 0 && serviceCharge <= 100)) return setTaxError('Service charge rate must be between 0 and 100.')
+    if (!(vat >= 0 && vat <= 100)) {
+      setTaxError('VAT rate must be a valid percentage between 0 and 100.')
+      return
+    }
+    if (!(serviceCharge >= 0 && serviceCharge <= 100)) {
+      setTaxError('Service charge rate must be a valid percentage between 0 and 100.')
+      return
+    }
 
-    setTaxSaving(true)
+    setSavingTaxes(true)
     try {
       const updated = await updateTaxSettings(vat, serviceCharge)
       setVatRate(String(updated.vatRatePercent))
       setServiceChargeRate(String(updated.serviceChargeRatePercent))
-      setTaxSaved(true)
+      toast.success('VAT and Service Charge rates updated.')
     } catch (err) {
-      setTaxError(err instanceof Error ? err.message : 'Failed to save charges.')
+      setTaxError(err instanceof Error ? err.message : 'Failed to save charge rates.')
+      toast.error('Failed to save charges.')
     } finally {
-      setTaxSaving(false)
+      setSavingTaxes(false)
     }
   }
 
-  const savePrinterSettings = async (event: FormEvent) => {
+  const submitPrinter = async (event: FormEvent) => {
     event.preventDefault()
     setPrinterError('')
-    setPrinterSaved(false)
 
     const port = Number(printerPort)
-    if (!Number.isInteger(port) || port < 1 || port > 65535) return setPrinterError('Port must be between 1 and 65535.')
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setPrinterError('Port must be a valid TCP port number between 1 and 65535.')
+      return
+    }
 
-    setPrinterSaving(true)
+    setSavingPrinter(true)
     try {
       const updated = await updatePrinterSettings(printerIp.trim() || null, port)
       setPrinterIp(updated.ipAddress ?? '')
       setPrinterPort(String(updated.port))
-      setPrinterSaved(true)
+      toast.success('Counter printer settings saved.')
     } catch (err) {
       setPrinterError(err instanceof Error ? err.message : 'Failed to save printer settings.')
+      toast.error('Failed to save printer settings.')
     } finally {
-      setPrinterSaving(false)
+      setSavingPrinter(false)
     }
   }
 
   if (loading) {
     return (
       <main className="content menu-content">
-        <p className="muted">Loading settings…</p>
+        <div className="loading-container">
+          <div className="btn-spinner large" />
+          <p className="muted">Loading system settings…</p>
+        </div>
       </main>
     )
   }
 
+  // Sample figures for live preview calculations
+  const sampleSubtotal = 120.0
+  const sampleVatNum = Number(vatRate) || 0
+  const sampleScNum = Number(serviceChargeRate) || 0
+  const sampleScAmount = (sampleSubtotal * sampleScNum) / 100
+  const sampleVatAmount = ((sampleSubtotal + sampleScAmount) * sampleVatNum) / 100
+  const sampleTotal = sampleSubtotal + sampleScAmount + sampleVatAmount
+
   return (
-    <main className="content menu-content">
-      <div className="dashboard-hero">
+    <main className="content settings-page-content">
+      {/* Header */}
+      <div className="dashboard-hero settings-hero">
         <div>
-          <p className="eyebrow">Configuration</p>
-          <h1>Settings</h1>
-          <p className="muted">Customize receipts and the charges applied to every order.</p>
+          <p className="eyebrow">Administration</p>
+          <h1>Settings &amp; Preferences</h1>
+          <p className="muted">
+            Configure receipt branding, automated tax rules, and physical ESC/POS counter printers.
+          </p>
         </div>
       </div>
 
-      {loadError && <div className="alert error">{loadError}</div>}
-
-      <section className="section-card">
-        <div className="section-heading">
-          <div><p className="eyebrow">Receipt</p><h2>Content &amp; branding</h2></div>
+      {loadError && (
+        <div className="alert error">
+          <Icon name="alertTriangle" size={16} /> {loadError}
         </div>
+      )}
 
-        <form className="settings-form" onSubmit={submit}>
-          <label className="settings-field">
-            Business name
-            <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="Shown at the top of every receipt" />
-          </label>
+      {/* Navigation Tabs */}
+      <div className="settings-nav-tabs">
+        <button
+          type="button"
+          className={`settings-tab-btn ${activeTab === 'receipt' ? 'active' : ''}`}
+          onClick={() => setActiveTab('receipt')}
+        >
+          <Icon name="receipt" size={16} />
+          <span>Receipt &amp; Branding</span>
+        </button>
+        <button
+          type="button"
+          className={`settings-tab-btn ${activeTab === 'taxes' ? 'active' : ''}`}
+          onClick={() => setActiveTab('taxes')}
+        >
+          <Icon name="tag" size={16} />
+          <span>Taxes &amp; Service Charges</span>
+        </button>
+        <button
+          type="button"
+          className={`settings-tab-btn ${activeTab === 'printer' ? 'active' : ''}`}
+          onClick={() => setActiveTab('printer')}
+        >
+          <Icon name="printer" size={16} />
+          <span>Counter Printer</span>
+        </button>
+      </div>
 
-          <label className="settings-field">
-            Footer message
-            <input value={footerMessage} onChange={(e) => setFooterMessage(e.target.value)} placeholder="e.g. Thank you for your visit!" />
-          </label>
+      {/* Main Content Layout: Form Left, Thermal Receipt Mockup Right */}
+      <div className="settings-split-grid">
+        {/* Left Column: Active Form */}
+        <div className="settings-forms-container">
+          {/* Tab 1: Receipt Branding */}
+          {activeTab === 'receipt' && (
+            <section className="section-card settings-card">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Customer Documents</p>
+                  <h2>Receipt &amp; Bill Branding</h2>
+                </div>
+              </div>
 
-          <label className="settings-checkbox">
-            <input type="checkbox" checked={showTaxId} onChange={(e) => setShowTaxId(e.target.checked)} />
-            Show tax / VAT ID on receipt
-          </label>
+              <form className="settings-form" onSubmit={submitReceipt}>
+                <label className="settings-field">
+                  <span className="field-title">Business Display Name</span>
+                  <input
+                    value={businessName}
+                    onChange={(e) => setBusinessName(e.target.value)}
+                    placeholder="e.g. The Grand Bistro & Bar"
+                  />
+                  <small className="field-helper">Printed at the very top of round tickets and final bills.</small>
+                </label>
 
-          {showTaxId && (
-            <label className="settings-field">
-              Tax / VAT ID
-              <input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="e.g. VAT-123456" />
-            </label>
+                <label className="settings-field">
+                  <span className="field-title">Receipt Footer Message</span>
+                  <input
+                    value={footerMessage}
+                    onChange={(e) => setFooterMessage(e.target.value)}
+                    placeholder="e.g. Thank you for dining with us!"
+                  />
+                  <small className="field-helper">Friendly farewell note or Wi-Fi code at the bottom of the bill.</small>
+                </label>
+
+                <div className="settings-checkbox-wrapper">
+                  <label className="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={showTaxId}
+                      onChange={(e) => setShowTaxId(e.target.checked)}
+                    />
+                    <span>Print Tax / VAT Identification Number on receipt</span>
+                  </label>
+                </div>
+
+                {showTaxId && (
+                  <label className="settings-field">
+                    <span className="field-title">Tax / VAT Number</span>
+                    <input
+                      value={taxId}
+                      onChange={(e) => setTaxId(e.target.value)}
+                      placeholder="e.g. GB 982 1234 56"
+                    />
+                  </label>
+                )}
+
+                {receiptError && (
+                  <div className="alert error">
+                    <Icon name="alertTriangle" size={14} /> {receiptError}
+                  </div>
+                )}
+
+                <button className="primary-button settings-save-btn" type="submit" disabled={savingReceipt}>
+                  {savingReceipt ? (
+                    <>
+                      <span className="btn-spinner" /> Saving…
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="check" size={15} /> Save Receipt Settings
+                    </>
+                  )}
+                </button>
+              </form>
+            </section>
           )}
 
-          {saveError && <div className="alert error">{saveError}</div>}
-          {saved && !saveError && <div className="alert success">Settings saved.</div>}
+          {/* Tab 2: Taxes & Charges */}
+          {activeTab === 'taxes' && (
+            <section className="section-card settings-card">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Automated Calculations</p>
+                  <h2>VAT &amp; Service Charges</h2>
+                </div>
+              </div>
 
-          <button className="primary-button" type="submit" disabled={saving}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-        </form>
-      </section>
+              <form className="settings-form" onSubmit={submitTaxes}>
+                <label className="settings-field">
+                  <span className="field-title">Value Added Tax / Sales Tax Rate (%)</span>
+                  <div className="input-with-symbol">
+                    <input
+                      value={vatRate}
+                      onChange={(e) => setVatRate(e.target.value)}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      placeholder="20"
+                      required
+                    />
+                    <span className="symbol-addon">%</span>
+                  </div>
+                  <small className="field-helper">Applied to the bill subtotal plus service charge.</small>
+                </label>
 
-      <section className="section-card">
-        <div className="section-heading">
-          <div><p className="eyebrow">Charges</p><h2>VAT &amp; service charge</h2></div>
+                <label className="settings-field">
+                  <span className="field-title">Service Charge Rate (%)</span>
+                  <div className="input-with-symbol">
+                    <input
+                      value={serviceChargeRate}
+                      onChange={(e) => setServiceChargeRate(e.target.value)}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      placeholder="10"
+                      required
+                    />
+                    <span className="symbol-addon">%</span>
+                  </div>
+                  <small className="field-helper">Discretionary service charge calculated on the food &amp; drinks subtotal.</small>
+                </label>
+
+                {taxError && (
+                  <div className="alert error">
+                    <Icon name="alertTriangle" size={14} /> {taxError}
+                  </div>
+                )}
+
+                <button className="primary-button settings-save-btn" type="submit" disabled={savingTaxes}>
+                  {savingTaxes ? (
+                    <>
+                      <span className="btn-spinner" /> Saving…
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="check" size={15} /> Save Charges
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <div className="settings-info-box">
+                <Icon name="info" size={18} />
+                <p>
+                  <strong>Calculation Formula:</strong> Food &amp; Beverage subtotal + Service Charge (
+                  {serviceChargeRate || '0'}%) + VAT ({vatRate || '0'}%) = Final Customer Bill.
+                </p>
+              </div>
+            </section>
+          )}
+
+          {/* Tab 3: Hardware Printer */}
+          {activeTab === 'printer' && (
+            <section className="section-card settings-card">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Hardware Configuration</p>
+                  <h2>Pass / Counter Thermal Printer</h2>
+                </div>
+              </div>
+
+              <form className="settings-form" onSubmit={submitPrinter}>
+                <label className="settings-field">
+                  <span className="field-title">Thermal Printer Local IP Address</span>
+                  <div className="input-with-symbol">
+                    <Icon name="wifi" size={16} className="input-lead-icon" />
+                    <input
+                      value={printerIp}
+                      onChange={(e) => setPrinterIp(e.target.value)}
+                      placeholder="e.g. 192.168.1.150"
+                    />
+                  </div>
+                  <small className="field-helper">
+                    Local network IP of the ESC/POS thermal printer at the kitchen pass or cash counter.
+                  </small>
+                </label>
+
+                <label className="settings-field">
+                  <span className="field-title">ESC/POS Port</span>
+                  <input
+                    value={printerPort}
+                    onChange={(e) => setPrinterPort(e.target.value)}
+                    type="number"
+                    min="1"
+                    max="65535"
+                    placeholder="9100"
+                    required
+                  />
+                  <small className="field-helper">Standard RAW thermal printing port is 9100.</small>
+                </label>
+
+                {printerError && (
+                  <div className="alert error">
+                    <Icon name="alertTriangle" size={14} /> {printerError}
+                  </div>
+                )}
+
+                <button className="primary-button settings-save-btn" type="submit" disabled={savingPrinter}>
+                  {savingPrinter ? (
+                    <>
+                      <span className="btn-spinner" /> Saving…
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="check" size={15} /> Save Printer Config
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <div className="settings-info-box">
+                <Icon name="printer" size={18} />
+                <p>
+                  When configured, pressing <strong>"Send round"</strong> or <strong>"Close &amp; bill"</strong> from any iPad/terminal instantly streams ESC/POS ticket bytes to this printer.
+                </p>
+              </div>
+            </section>
+          )}
         </div>
 
-        <form className="settings-form currency-base-form" onSubmit={saveTaxSettings}>
-          <label className="settings-field">
-            VAT rate (%)
-            <input value={vatRate} onChange={(e) => setVatRate(e.target.value)} type="number" step="0.01" min="0" max="100" placeholder="e.g. 20" />
-          </label>
-          <label className="settings-field">
-            Service charge rate (%)
-            <input value={serviceChargeRate} onChange={(e) => setServiceChargeRate(e.target.value)} type="number" step="0.01" min="0" max="100" placeholder="e.g. 12.5" />
-          </label>
-          {taxError && <div className="alert error">{taxError}</div>}
-          {taxSaved && !taxError && <div className="alert success">Charges saved.</div>}
-          <button className="primary-button" type="submit" disabled={taxSaving}>
-            {taxSaving ? 'Saving…' : 'Save charges'}
-          </button>
-        </form>
+        {/* Right Column: Live Thermal Receipt Mockup Preview */}
+        <aside className="settings-preview-aside">
+          <div className="preview-sticky-card">
+            <div className="preview-card-header">
+              <Icon name="receipt" size={16} />
+              <strong>Live Receipt Preview</strong>
+              <span className="live-preview-pill">Real-time</span>
+            </div>
 
-        <p className="muted currency-section-note">
-          Applied automatically to every order: the service charge is calculated on the subtotal, then VAT is calculated
-          on the subtotal plus the service charge. Set service charge to 0 to leave it off.
-        </p>
-      </section>
+            {/* Thermal Paper Receipt Simulation */}
+            <div className="thermal-receipt-mockup">
+              <div className="receipt-paper-cut-top" />
+              <div className="receipt-paper-body">
+                <div className="receipt-brand-center">
+                  <strong className="receipt-business-name">{businessName || 'Your Restaurant Name'}</strong>
+                  <span className="receipt-meta-sub">ZIP Flow Restaurant OS</span>
+                  <span className="receipt-meta-sub">Date: {new Date().toLocaleDateString()} · 19:45</span>
+                  <span className="receipt-meta-sub">Table 4 · Guest: Sarah M.</span>
+                </div>
 
-      <section className="section-card">
-        <div className="section-heading">
-          <div><p className="eyebrow">Hardware</p><h2>Counter printer</h2></div>
-        </div>
+                <div className="receipt-line-divider" />
 
-        <form className="settings-form currency-base-form" onSubmit={savePrinterSettings}>
-          <label className="settings-field">
-            Printer IP address
-            <input value={printerIp} onChange={(e) => setPrinterIp(e.target.value)} placeholder="e.g. 192.168.1.50" />
-          </label>
-          <label className="settings-field">
-            Port
-            <input value={printerPort} onChange={(e) => setPrinterPort(e.target.value)} type="number" min="1" max="65535" placeholder="9100" />
-          </label>
-          {printerError && <div className="alert error">{printerError}</div>}
-          {printerSaved && !printerError && <div className="alert success">Printer settings saved.</div>}
-          <button className="primary-button" type="submit" disabled={printerSaving}>
-            {printerSaving ? 'Saving…' : 'Save printer'}
-          </button>
-        </form>
+                <div className="receipt-sample-items">
+                  <div className="mockup-line">
+                    <span>1× Ribeye Steak</span>
+                    <span>{currencySymbol}65.00</span>
+                  </div>
+                  <div className="mockup-line-note">· Medium rare, peppercorn sauce</div>
 
-        <p className="muted currency-section-note">
-          Round tickets and bills print here automatically when a waiter sends a round or closes an order.
-        </p>
-      </section>
+                  <div className="mockup-line">
+                    <span>2× Signature Cocktails</span>
+                    <span>{currencySymbol}35.00</span>
+                  </div>
+
+                  <div className="mockup-line">
+                    <span>1× Tiramisu Dessert</span>
+                    <span>{currencySymbol}20.00</span>
+                  </div>
+                </div>
+
+                <div className="receipt-line-divider" />
+
+                <div className="receipt-mockup-totals">
+                  <div className="mockup-total-row">
+                    <span>Subtotal</span>
+                    <span>{currencySymbol}{sampleSubtotal.toFixed(2)}</span>
+                  </div>
+                  {sampleScNum > 0 && (
+                    <div className="mockup-total-row">
+                      <span>Service Charge ({sampleScNum}%)</span>
+                      <span>{currencySymbol}{sampleScAmount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {sampleVatNum > 0 && (
+                    <div className="mockup-total-row">
+                      <span>VAT ({sampleVatNum}%)</span>
+                      <span>{currencySymbol}{sampleVatAmount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="mockup-total-row total-row-grand">
+                    <strong>TOTAL</strong>
+                    <strong>{currencySymbol}{sampleTotal.toFixed(2)}</strong>
+                  </div>
+                </div>
+
+                <div className="receipt-line-divider" />
+
+                {showTaxId && (
+                  <p className="receipt-tax-id-line">
+                    VAT / Tax ID: {taxId || 'VAT-SAMPLE-12345'}
+                  </p>
+                )}
+
+                <p className="receipt-footer-text">{footerMessage || 'Thank you for your visit!'}</p>
+
+                <div className="receipt-barcode-simulation">
+                  <div className="barcode-bars" />
+                  <small>ORDER #1042 · TABLE 4</small>
+                </div>
+              </div>
+              <div className="receipt-paper-cut-bottom" />
+            </div>
+          </div>
+        </aside>
+      </div>
     </main>
   )
 }

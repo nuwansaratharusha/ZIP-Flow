@@ -26,6 +26,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
       # Host must be the compose service name — containers do not share a network
       # namespace, so "localhost" here would point the API at itself.
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-ZipFlow};Username=${POSTGRES_USER:-zipflow};Password=${POSTGRES_PASSWORD:-ChangeThisLocalPassword!1}"

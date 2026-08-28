@@ -19,6 +19,7 @@ public interface IMenuService
 {
     Task<IReadOnlyList<CategoryDto>> GetCategoriesAsync(Guid tenantId, CancellationToken ct);
     Task<CategoryDto> CreateCategoryAsync(Guid tenantId, string name, int sortOrder, CancellationToken ct);
+    Task<(bool Success, string? ErrorMessage)> DeleteCategoryAsync(Guid tenantId, Guid categoryId, CancellationToken ct);
     Task<IReadOnlyList<MenuItemDto>> GetItemsAsync(Guid tenantId, CancellationToken ct);
     Task<(CreateMenuItemResult Result, MenuItemDto? Item)> CreateItemAsync(Guid tenantId, Guid categoryId, string name, string sku, decimal price, CancellationToken ct);
     Task<MenuItemDto?> UpdateItemAsync(Guid tenantId, Guid itemId, string name, decimal price, Guid categoryId, CancellationToken ct);
@@ -50,6 +51,26 @@ public sealed class MenuService(AppDbContext db) : IMenuService
         db.Categories.Add(category);
         await db.SaveChangesAsync(ct);
         return new CategoryDto(category.Id, category.Name, category.SortOrder);
+    }
+
+    public async Task<(bool Success, string? ErrorMessage)> DeleteCategoryAsync(Guid tenantId, Guid categoryId, CancellationToken ct)
+    {
+        var category = await db.Categories
+            .SingleOrDefaultAsync(x => x.Id == categoryId && x.TenantId == tenantId && x.IsActive, ct);
+
+        if (category is null)
+            return (false, "Category not found.");
+
+        var hasActiveItems = await db.MenuItems.AnyAsync(
+            x => x.CategoryId == categoryId && x.TenantId == tenantId && !x.IsArchived, ct);
+
+        if (hasActiveItems)
+            return (false, "Cannot delete category with active dishes. Please reassign or archive its dishes first.");
+
+        category.IsActive = false;
+        category.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return (true, null);
     }
 
     public async Task<IReadOnlyList<MenuItemDto>> GetItemsAsync(Guid tenantId, CancellationToken ct)

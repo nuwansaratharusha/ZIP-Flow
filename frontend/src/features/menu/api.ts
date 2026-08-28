@@ -12,6 +12,12 @@ export function createCategory(name: string, sortOrder: number) {
   }).then((res) => res.data)
 }
 
+export function deleteCategory(id: string) {
+  return apiRequest<ApiEnvelope<{ deleted: boolean }>>(`/api/menu/categories/${id}`, {
+    method: 'DELETE',
+  }).then((res) => res.data)
+}
+
 export function getItems() {
   return apiRequest<ApiEnvelope<MenuItem[]>>('/api/menu/items').then((res) => res.data)
 }
