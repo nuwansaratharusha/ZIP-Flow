@@ -191,6 +191,8 @@
   overflow-y: auto;
   padding-right: 4px;
   flex: 1;
+  align-content: start;
+  grid-auto-rows: max-content;
 }
 
 .product-tile {
@@ -202,6 +204,7 @@
   border-radius: 14px;
   padding: 14px;
   min-height: 140px;
+  height: 155px;
   text-align: left;
   cursor: pointer;
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
@@ -215,13 +218,14 @@
 }
 
 .product-tile:active {
-  transform: scale(0.97);
+  transform: scale(0.98);
 }
 
 .product-tile.in-current-round {
   border-color: #3b82f6;
   background: #eff6ff;
 }
+
 
 .product-top-row {
   display: flex;
@@ -498,42 +502,54 @@
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 13px 14px;
   margin-bottom: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
   transition: all 0.15s ease;
 }
 
 .order-line:hover {
   border-color: #cbd5e1;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04);
 }
 
 .order-line-main {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .order-line-title {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .line-item-name {
   font-size: 14px;
+  font-weight: 700;
   color: #0f172a;
+  line-height: 1.3;
+  word-break: break-word;
 }
 
 .line-unit-price {
   font-size: 12px;
   color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .line-total-price {
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 800;
   color: #0f172a;
+  white-space: nowrap;
+  letter-spacing: -0.02em;
 }
 
 .line-actions {
@@ -544,17 +560,18 @@
 }
 
 .quantity-controls {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   background: #f1f5f9;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
   padding: 2px;
 }
 
 .qty-btn {
   background: #ffffff;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #e2e8f0;
   width: 28px;
   height: 28px;
   border-radius: 6px;
@@ -562,17 +579,19 @@
   place-items: center;
   cursor: pointer;
   color: #0f172a;
-  transition: all 0.15s ease;
+  transition: all 0.12s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
 .qty-btn:hover {
-  background: #e2e8f0;
+  background: #f8fafc;
+  border-color: #cbd5e1;
 }
 
 .qty-val {
   font-size: 13px;
-  font-weight: 700;
-  min-width: 22px;
+  font-weight: 750;
+  min-width: 24px;
   text-align: center;
   color: #0f172a;
 }
@@ -580,44 +599,52 @@
 .note-toggle-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  background: #f8fafc;
+  gap: 6px;
+  background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 5px 9px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #64748b;
+  padding: 0 12px;
+  height: 32px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #475569;
   cursor: pointer;
-  transition: all 0.15s ease;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .note-toggle-btn:hover {
-  background: #f1f5f9;
+  background: #f8fafc;
   color: #0f172a;
+  border-color: #cbd5e1;
 }
 
 .note-toggle-btn.has-note {
   background: #eff6ff;
-  border-color: #bfdbfe;
+  border-color: #93c5fd;
   color: #2563eb;
 }
 
 .line-delete-btn {
-  background: none;
-  border: none;
+  background: transparent;
+  border: 1px solid transparent;
   color: #94a3b8;
-  padding: 6px;
+  width: 32px;
+  height: 32px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
+  transition: all 0.14s ease;
 }
 
 .line-delete-btn:hover {
   color: #ef4444;
   background: #fee2e2;
+  border-color: #fecaca;
 }
+
 
 /* Quick Notes Panel */
 .quick-notes-panel {

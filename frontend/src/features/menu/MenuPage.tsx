@@ -126,7 +126,7 @@ export function MenuPage() {
   // Auto-generate SKU helper from name
   const handleNameChange = (nameVal: string) => {
     setItemName(nameVal)
-    if (!itemSku || itemSku.startsWith('SKU-')) {
+    if (!itemSku || itemSku.startsWith('SKU-') || itemSku.length < 3) {
       const generated = nameVal
         .trim()
         .toUpperCase()
@@ -175,6 +175,8 @@ export function MenuPage() {
       return
     }
     setEditingId(null)
+    if (price === item.price) return
+
     try {
       await updateItem(item.id, item.name, price, item.categoryId)
       await refetch()
@@ -236,7 +238,7 @@ export function MenuPage() {
         </div>
       )}
 
-      {/* Main Grid: Catalog Left, Categories & Add Right */}
+      {/* Main Grid: Catalog Left, Categories Right */}
       <section className="dashboard-grid menu-grid">
         {/* Left Column: Items List */}
         <div className="section-card menu-items-card">
@@ -280,7 +282,7 @@ export function MenuPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
               {searchQuery && (
-                <button type="button" className="search-clear-btn" onClick={() => setSearchQuery('')}>
+                <button type="button" className="search-clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
                   <Icon name="close" size={12} />
                 </button>
               )}
@@ -326,10 +328,14 @@ export function MenuPage() {
                           autoFocus
                           type="number"
                           step="0.01"
+                          min="0"
                           value={editingPrice}
                           onChange={(e) => setEditingPrice(e.target.value)}
                           onBlur={() => savePrice(item)}
-                          onKeyDown={(e) => e.key === 'Enter' && savePrice(item)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') savePrice(item)
+                            if (e.key === 'Escape') setEditingId(null)
+                          }}
                         />
                         <button type="button" className="save-price-btn" onClick={() => savePrice(item)}>
                           <Icon name="check" size={13} />
@@ -374,16 +380,17 @@ export function MenuPage() {
             </div>
           )}
 
-          {/* Add Item Form Card */}
+          {/* Clean, Polished Add Item Form Card */}
           <form className="menu-add-form menu-add-item-card" onSubmit={submitItem}>
             <div className="form-card-header">
-              <Icon name="plus" size={16} />
+              <Icon name="plus" size={15} />
               <strong>Add New Menu Item</strong>
             </div>
             <div className="menu-add-fields">
-              <div className="input-group">
-                <label>Category</label>
+              <div className="menu-field-col">
+                <label htmlFor="cat-select-field">Category</label>
                 <select
+                  id="cat-select-field"
                   value={itemCategoryId}
                   onChange={(e) => setItemCategoryId(e.target.value)}
                   disabled={categories.length === 0}
@@ -398,9 +405,10 @@ export function MenuPage() {
                 </select>
               </div>
 
-              <div className="input-group">
-                <label>Item Name</label>
+              <div className="menu-field-col flex-grow">
+                <label htmlFor="name-input-field">Item Name</label>
                 <input
+                  id="name-input-field"
                   placeholder="e.g. Wagyu Ribeye Steak"
                   value={itemName}
                   onChange={(e) => handleNameChange(e.target.value)}
@@ -408,19 +416,22 @@ export function MenuPage() {
                 />
               </div>
 
-              <div className="input-group">
-                <label>SKU Code</label>
+              <div className="menu-field-col">
+                <label htmlFor="sku-input-field">SKU Code</label>
                 <input
+                  id="sku-input-field"
                   placeholder="e.g. STEAK01"
                   value={itemSku}
-                  onChange={(e) => setItemSku(e.target.value)}
+                  onChange={(e) => setItemSku(e.target.value.toUpperCase())}
+                  className="font-mono"
                   required
                 />
               </div>
 
-              <div className="input-group">
-                <label>Price ({currencySymbol})</label>
+              <div className="menu-field-col">
+                <label htmlFor="price-input-field">Price ({currencySymbol})</label>
                 <input
+                  id="price-input-field"
                   placeholder="0.00"
                   inputMode="decimal"
                   type="number"
@@ -433,7 +444,7 @@ export function MenuPage() {
               </div>
 
               <button
-                className="primary-button add-item-submit-btn"
+                className="add-item-submit-btn"
                 type="submit"
                 disabled={savingItem || categories.length === 0}
               >
@@ -441,7 +452,7 @@ export function MenuPage() {
               </button>
             </div>
             {itemError && (
-              <div className="alert error">
+              <div className="alert error menu-form-error">
                 <Icon name="alertTriangle" size={14} /> {itemError}
               </div>
             )}
@@ -486,10 +497,10 @@ export function MenuPage() {
 
           <form className="menu-add-form menu-add-cat-card" onSubmit={submitCategory}>
             <div className="form-card-header">
-              <Icon name="plus" size={16} />
+              <Icon name="plus" size={15} />
               <strong>New Category</strong>
             </div>
-            <div className="menu-add-fields menu-add-fields-category">
+            <div className="menu-add-fields-category">
               <input
                 placeholder="e.g. Starters, Mains, Desserts"
                 value={categoryName}
@@ -497,7 +508,7 @@ export function MenuPage() {
                 required
               />
               <button
-                className="secondary-button"
+                className="add-cat-submit-btn"
                 type="submit"
                 disabled={savingCategory || !categoryName.trim()}
               >
@@ -505,7 +516,7 @@ export function MenuPage() {
               </button>
             </div>
             {categoryError && (
-              <div className="alert error">
+              <div className="alert error menu-form-error">
                 <Icon name="alertTriangle" size={14} /> {categoryError}
               </div>
             )}
