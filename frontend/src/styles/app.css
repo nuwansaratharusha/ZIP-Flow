@@ -3070,13 +3070,90 @@ svg { flex: 0 0 auto; }
   letter-spacing: 0.08em;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1024px) {
+  .content {
+    padding: 20px 18px 36px;
+  }
+  .dashboard-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .menu-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
   .settings-split-grid {
     grid-template-columns: 1fr;
+    gap: 20px;
   }
   .orders-metrics-strip {
     grid-template-columns: repeat(2, 1fr);
   }
+  .tables-selection-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    grid-template-columns: 60px minmax(0, 1fr);
+  }
+  .icon-rail {
+    width: 60px;
+    min-width: 60px;
+  }
+  .rail-item {
+    width: 42px;
+    height: 42px;
+  }
+  .topbar {
+    padding: 0 12px;
+    height: 56px;
+  }
+  .topbar-time {
+    display: none;
+  }
+  .brand-sub-badge {
+    display: none;
+  }
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+  .content {
+    padding: 16px 12px 32px;
+  }
+  .orders-table .orders-row {
+    font-size: 11px;
+  }
+}
+
+/* iOS Safe Area & Touch Ergonomics */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .topbar {
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+  .icon-rail {
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .toast-container {
+    bottom: max(16px, env(safe-area-inset-bottom));
+    right: max(16px, env(safe-area-inset-right));
+  }
+}
+
+button, input, select, a, .product-tile, .pos-table-card, .cat-tab, .filter-pill {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 

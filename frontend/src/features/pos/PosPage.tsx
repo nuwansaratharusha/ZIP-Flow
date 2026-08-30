@@ -59,6 +59,7 @@ export function PosPage() {
   const [roundLines, setRoundLines] = useState<RoundLine[]>([])
   const [activeNoteLineId, setActiveNoteLineId] = useState<string | null>(null)
   const [showPreviousRounds, setShowPreviousRounds] = useState(true)
+  const [tabletTab, setTabletTab] = useState<'catalog' | 'ticket'>('catalog')
 
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
@@ -366,10 +367,12 @@ export function PosPage() {
 
   const sortedRounds = order.rounds.slice().sort((a, b) => a.roundNumber - b.roundNumber)
 
+  const roundItemCount = roundLines.reduce((sum, l) => sum + l.quantity, 0)
+
   return (
-    <main className="pos-page">
+    <main className={`pos-page tablet-view-${tabletTab}`}>
       {/* Left Area: Menu Catalog & Categories */}
-      <section className="pos-catalog">
+      <section className={`pos-catalog ${tabletTab === 'catalog' ? 'tablet-active' : 'tablet-hidden'}`}>
         {/* Header Toolbar */}
         <div className="pos-toolbar">
           <div className="pos-toolbar-left">
@@ -384,6 +387,24 @@ export function PosPage() {
             <h1 className="posx-customer-name">
               <Icon name="user" size={16} /> {order.customerName}
             </h1>
+          </div>
+
+          {/* iPad / Tablet Tab Switcher */}
+          <div className="pos-tablet-tab-switcher">
+            <button
+              type="button"
+              className={`tablet-tab-btn ${tabletTab === 'catalog' ? 'active' : ''}`}
+              onClick={() => setTabletTab('catalog')}
+            >
+              <Icon name="utensils" size={14} /> Menu
+            </button>
+            <button
+              type="button"
+              className={`tablet-tab-btn ${tabletTab === 'ticket' ? 'active' : ''}`}
+              onClick={() => setTabletTab('ticket')}
+            >
+              <Icon name="receipt" size={14} /> Ticket {roundItemCount > 0 && `(${roundItemCount})`}
+            </button>
           </div>
 
           <div className="pos-search">
@@ -467,18 +488,48 @@ export function PosPage() {
             </div>
           )}
         </div>
+
+        {/* Tablet / Mobile Floating Action Bar for Quick Ticket Review */}
+        {roundItemCount > 0 && tabletTab === 'catalog' && (
+          <div className="pos-floating-ticket-bar">
+            <div className="floating-ticket-info">
+              <strong>Round #{sortedRounds.length + 1}</strong>
+              <span>
+                {roundItemCount} item{roundItemCount === 1 ? '' : 's'} · {formatMoney(roundSubtotal, order.currencySymbol)}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="floating-ticket-btn"
+              onClick={() => setTabletTab('ticket')}
+            >
+              <span>Review &amp; Send</span>
+              <Icon name="arrowRight" size={15} />
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Right Area: Order Ticket & Round in Progress */}
-      <aside className="order-panel">
+      <aside className={`order-panel ${tabletTab === 'ticket' ? 'tablet-active' : 'tablet-hidden'}`}>
         <div className="order-header">
           <div>
             <span className="order-eyebrow">Table Service</span>
             <h2 className="order-title">Round #{sortedRounds.length + 1}</h2>
           </div>
-          <span className="order-status-chip">
-            <span className="live-dot" /> Live Order
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="pos-back-to-menu-btn"
+              onClick={() => setTabletTab('catalog')}
+              title="Return to Menu Catalog"
+            >
+              <Icon name="arrowLeft" size={14} /> <span>Menu</span>
+            </button>
+            <span className="order-status-chip">
+              <span className="live-dot" /> Live
+            </span>
+          </div>
         </div>
 
         <div className="order-context">
