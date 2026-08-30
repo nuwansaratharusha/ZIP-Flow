@@ -40,5 +40,16 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    container_name: zipflow-frontend
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
 volumes:
   zipflow_pg_data:
