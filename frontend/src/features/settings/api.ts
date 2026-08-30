@@ -38,3 +38,10 @@ export function updatePrinterSettings(ipAddress: string | null, port: number) {
     body: JSON.stringify({ ipAddress, port }),
   }).then((res) => res.data)
 }
+
+export function testPrinter(ipAddress?: string | null, port?: number) {
+  return apiRequest<ApiEnvelope<{ message: string }>>('/api/settings/printer/test', {
+    method: 'POST',
+    body: JSON.stringify({ ipAddress: ipAddress ?? undefined, port }),
+  }).then((res) => res.data)
+}

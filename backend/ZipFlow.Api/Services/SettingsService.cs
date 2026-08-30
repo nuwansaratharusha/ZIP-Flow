@@ -26,9 +26,12 @@ public interface ISettingsService
 
     Task<(bool Success, string? Error, PrinterSettingsDto? Result)> UpdatePrinterSettingsAsync(
         Guid tenantId, string? ipAddress, int port, CancellationToken ct);
+
+    Task<(bool Success, string? Message)> TestPrinterAsync(
+        Guid tenantId, string? ipAddress, int? port, CancellationToken ct);
 }
 
-public sealed class SettingsService(AppDbContext db) : ISettingsService
+public sealed class SettingsService(AppDbContext db, IEscPosPrintService printer) : ISettingsService
 {
     public async Task<ReceiptSettingsDto?> GetReceiptSettingsAsync(Guid tenantId, CancellationToken ct)
     {
@@ -108,5 +111,31 @@ public sealed class SettingsService(AppDbContext db) : ISettingsService
         await db.SaveChangesAsync(ct);
 
         return (true, null, new PrinterSettingsDto(tenant.PrinterIpAddress, tenant.PrinterPort));
+    }
+
+    public async Task<(bool Success, string? Message)> TestPrinterAsync(
+        Guid tenantId, string? ipAddress, int? port, CancellationToken ct)
+    {
+        var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tenantId, ct);
+        if (tenant is null)
+            return (false, "Tenant not found.");
+
+        var targetIp = string.IsNullOrWhiteSpace(ipAddress) ? tenant.PrinterIpAddress : ipAddress.Trim();
+        var targetPort = port ?? tenant.PrinterPort;
+
+        if (string.IsNullOrWhiteSpace(targetIp))
+            return (false, "No printer IP address configured. Please set an IP address first.");
+
+        var businessName = !string.IsNullOrWhiteSpace(tenant.ReceiptBusinessName) ? tenant.ReceiptBusinessName : tenant.Name;
+
+        try
+        {
+            await printer.TestPrintAsync(targetIp, targetPort, businessName, ct);
+            return (true, $"Test print sent successfully to printer at {targetIp}:{targetPort}.");
+        }
+        catch (PrinterUnavailableException ex)
+        {
+            return (false, ex.Message);
+        }
     }
 }

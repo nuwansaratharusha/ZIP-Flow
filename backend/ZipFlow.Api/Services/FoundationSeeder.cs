@@ -50,9 +50,24 @@ public sealed class FoundationSeeder(
                 Code = tenantCode,
                 Name = configuration["BootstrapAdmin:TenantName"] ?? "Demo Restaurant Group",
                 CurrencyCode = configuration["BootstrapAdmin:CurrencyCode"] ?? "GBP",
-                CurrencySymbol = configuration["BootstrapAdmin:CurrencySymbol"] ?? "£"
+                CurrencySymbol = configuration["BootstrapAdmin:CurrencySymbol"] ?? "£",
+                PrinterIpAddress = "192.168.1.117",
+                PrinterPort = 9100,
+                ReceiptBusinessName = configuration["BootstrapAdmin:TenantName"] ?? "ZIP Flow Demo Restaurant"
             };
             db.Tenants.Add(tenant);
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(tenant.PrinterIpAddress))
+            {
+                tenant.PrinterIpAddress = "192.168.1.117";
+                tenant.PrinterPort = 9100;
+            }
+            if (string.IsNullOrWhiteSpace(tenant.ReceiptBusinessName))
+            {
+                tenant.ReceiptBusinessName = tenant.Name;
+            }
         }
 
         var locationCode = configuration["BootstrapAdmin:LocationCode"] ?? "MAIN";

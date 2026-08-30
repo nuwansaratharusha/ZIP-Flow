@@ -7,6 +7,7 @@ namespace ZipFlow.Api.Endpoints;
 public sealed record UpdateReceiptSettingsRequest(string? BusinessName, string FooterMessage, bool ShowTaxId, string? TaxId);
 public sealed record UpdateTaxSettingsRequest(decimal VatRatePercent, decimal ServiceChargeRatePercent);
 public sealed record UpdatePrinterSettingsRequest(string? IpAddress, int Port);
+public sealed record TestPrinterRequest(string? IpAddress, int? Port);
 
 public static class SettingsEndpoints
 {
@@ -70,6 +71,15 @@ public static class SettingsEndpoints
             return success
                 ? Results.Ok(ApiResponse<PrinterSettingsDto>.Ok(dto!))
                 : Results.BadRequest(ApiResponse<object>.Fail(error!));
+        })
+        .RequireAuthorization("permission:settings.receipt.manage");
+
+        group.MapPost("/printer/test", async (TestPrinterRequest? request, ICurrentRequestContext current, ISettingsService settings, CancellationToken ct) =>
+        {
+            var (success, message) = await settings.TestPrinterAsync(current.TenantId, request?.IpAddress, request?.Port, ct);
+            return success
+                ? Results.Ok(ApiResponse<object>.Ok(new { message }))
+                : Results.Json(ApiResponse<object>.Fail(message ?? "Printer test failed."), statusCode: StatusCodes.Status502BadGateway);
         })
         .RequireAuthorization("permission:settings.receipt.manage");
 

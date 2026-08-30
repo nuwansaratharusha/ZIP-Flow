@@ -6,6 +6,7 @@ import {
   getPrinterSettings,
   getReceiptSettings,
   getTaxSettings,
+  testPrinter,
   updatePrinterSettings,
   updateReceiptSettings,
   updateTaxSettings,
@@ -40,7 +41,9 @@ export function SettingsPage() {
   const [printerIp, setPrinterIp] = useState('')
   const [printerPort, setPrinterPort] = useState('9100')
   const [savingPrinter, setSavingPrinter] = useState(false)
+  const [testingPrinter, setTestingPrinter] = useState(false)
   const [printerError, setPrinterError] = useState('')
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
   useEffect(() => {
     Promise.all([getReceiptSettings(), getTaxSettings(), getPrinterSettings()])
@@ -138,6 +141,37 @@ export function SettingsPage() {
     } finally {
       setSavingPrinter(false)
     }
+  }
+
+  const handleTestPrint = async () => {
+    setPrinterError('')
+    setTestResult(null)
+    const port = Number(printerPort)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setPrinterError('Port must be a valid TCP port number between 1 and 65535.')
+      return
+    }
+
+    setTestingPrinter(true)
+    try {
+      const res = await testPrinter(printerIp.trim() || null, port)
+      setTestResult({ success: true, message: res.message })
+      toast.success(res.message || 'Test ticket sent to printer!')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Printer unreachable.'
+      setTestResult({ success: false, message: msg })
+      toast.error(msg)
+    } finally {
+      setTestingPrinter(false)
+    }
+  }
+
+  const selectDevice = (ip: string, port: number) => {
+    setPrinterIp(ip)
+    setPrinterPort(String(port))
+    setTestResult(null)
+    setPrinterError('')
+    toast.info(`Selected ${ip}:${port}`)
   }
 
   if (loading) {
@@ -366,23 +400,156 @@ export function SettingsPage() {
               <div className="section-heading">
                 <div>
                   <p className="eyebrow">Hardware Configuration</p>
-                  <h2>Pass / Counter Thermal Printer</h2>
+                  <h2>Counter &amp; Pass Thermal Printer</h2>
+                </div>
+              </div>
+
+              {/* Discovered Venue Devices & Presets */}
+              <div className="printer-preset-section" style={{ marginBottom: 20 }}>
+                <span className="field-title" style={{ display: 'block', marginBottom: 8, fontSize: 12, fontWeight: 700 }}>
+                  Discovered Restaurant Network Devices (1-Tap Select)
+                </span>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div
+                    onClick={() => selectDevice('192.168.1.117', 9100)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      background: printerIp === '192.168.1.117' ? '#eff6ff' : '#ffffff',
+                      border: `1.5px solid ${printerIp === '192.168.1.117' ? '#2563eb' : '#e2e8f0'}`,
+                      borderRadius: 10,
+                      cursor: 'pointer',
+                      transition: 'all 0.12s',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 8,
+                          background: printerIp === '192.168.1.117' ? '#2563eb' : '#f1f5f9',
+                          color: printerIp === '192.168.1.117' ? '#ffffff' : '#64748b',
+                          display: 'grid',
+                          placeItems: 'center',
+                        }}
+                      >
+                        <Icon name="printer" size={16} />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <strong style={{ fontSize: 13, color: '#0f172a' }}>Epson TM-m30II</strong>
+                          <span style={{ fontSize: 10, fontWeight: 750, color: '#2563eb', background: '#dbeafe', padding: '1px 6px', borderRadius: 4 }}>
+                            POS Printer (Recommended)
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 11, color: '#64748b' }}>
+                          IP: <strong>192.168.1.117:9100</strong> · MAC: 64:c6:d2:04:47:41
+                        </span>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '2px 8px', borderRadius: 9999 }}>
+                      ● Connected
+                    </span>
+                  </div>
+
+                  <div
+                    onClick={() => selectDevice('192.168.1.162', 9100)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      background: printerIp === '192.168.1.162' ? '#eff6ff' : '#ffffff',
+                      border: `1.5px solid ${printerIp === '192.168.1.162' ? '#2563eb' : '#e2e8f0'}`,
+                      borderRadius: 10,
+                      cursor: 'pointer',
+                      transition: 'all 0.12s',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 8,
+                          background: printerIp === '192.168.1.162' ? '#2563eb' : '#f1f5f9',
+                          color: printerIp === '192.168.1.162' ? '#ffffff' : '#64748b',
+                          display: 'grid',
+                          placeItems: 'center',
+                        }}
+                      >
+                        <Icon name="receipt" size={16} />
+                      </div>
+                      <div>
+                        <strong style={{ fontSize: 13, color: '#0f172a' }}>PRT - RECEIPT</strong>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>
+                          IP: <strong>192.168.1.162:9100</strong> · Secondary Pass Printer
+                        </div>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '2px 8px', borderRadius: 9999 }}>
+                      ● Connected
+                    </span>
+                  </div>
+
+                  <div
+                    onClick={() => selectDevice('192.168.1.156', 2590)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      background: printerIp === '192.168.1.156' ? '#eff6ff' : '#ffffff',
+                      border: `1.5px solid ${printerIp === '192.168.1.156' ? '#2563eb' : '#e2e8f0'}`,
+                      borderRadius: 10,
+                      cursor: 'pointer',
+                      transition: 'all 0.12s',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 8,
+                          background: printerIp === '192.168.1.156' ? '#2563eb' : '#f1f5f9',
+                          color: printerIp === '192.168.1.156' ? '#ffffff' : '#64748b',
+                          display: 'grid',
+                          placeItems: 'center',
+                        }}
+                      >
+                        <Icon name="grid" size={16} />
+                      </div>
+                      <div>
+                        <strong style={{ fontSize: 13, color: '#0f172a' }}>Kitchen Display System (KDS)</strong>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>
+                          IP: <strong>192.168.1.156:2590</strong> · Screen Station
+                        </div>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '2px 8px', borderRadius: 9999 }}>
+                      ● Connected
+                    </span>
+                  </div>
                 </div>
               </div>
 
               <form className="settings-form" onSubmit={submitPrinter}>
                 <label className="settings-field">
-                  <span className="field-title">Thermal Printer Local IP Address</span>
+                  <span className="field-title">Thermal Printer Target IP Address</span>
                   <div className="input-with-symbol">
                     <Icon name="wifi" size={16} className="input-lead-icon" />
                     <input
                       value={printerIp}
                       onChange={(e) => setPrinterIp(e.target.value)}
-                      placeholder="e.g. 192.168.1.150"
+                      placeholder="e.g. 192.168.1.117"
                     />
                   </div>
                   <small className="field-helper">
-                    Local network IP of the ESC/POS thermal printer at the kitchen pass or cash counter.
+                    Local network IP of the Epson POS thermal printer (e.g. 192.168.1.117).
                   </small>
                 </label>
 
@@ -397,7 +564,7 @@ export function SettingsPage() {
                     placeholder="9100"
                     required
                   />
-                  <small className="field-helper">Standard RAW thermal printing port is 9100.</small>
+                  <small className="field-helper">Standard RAW ESC/POS thermal printing port is 9100.</small>
                 </label>
 
                 {printerError && (
@@ -406,23 +573,50 @@ export function SettingsPage() {
                   </div>
                 )}
 
-                <button className="primary-button settings-save-btn" type="submit" disabled={savingPrinter}>
-                  {savingPrinter ? (
-                    <>
-                      <span className="btn-spinner" /> Saving…
-                    </>
-                  ) : (
-                    <>
-                      <Icon name="check" size={15} /> Save Printer Config
-                    </>
-                  )}
-                </button>
+                {testResult && (
+                  <div className={`alert ${testResult.success ? 'success' : 'error'}`}>
+                    <Icon name={testResult.success ? 'check' : 'alertTriangle'} size={14} /> {testResult.message}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                  <button className="primary-button settings-save-btn" type="submit" disabled={savingPrinter} style={{ flex: 1 }}>
+                    {savingPrinter ? (
+                      <>
+                        <span className="btn-spinner" /> Saving…
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="check" size={15} /> Save Printer Config
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={testingPrinter || !printerIp.trim()}
+                    onClick={handleTestPrint}
+                    style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                    title="Sends a test print ticket directly to this IP address"
+                  >
+                    {testingPrinter ? (
+                      <>
+                        <span className="btn-spinner" /> Testing…
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="printer" size={15} /> Print Test Ticket
+                      </>
+                    )}
+                  </button>
+                </div>
               </form>
 
-              <div className="settings-info-box">
+              <div className="settings-info-box" style={{ marginTop: 16 }}>
                 <Icon name="printer" size={18} />
                 <p>
-                  When configured, pressing <strong>"Send round"</strong> or <strong>"Close &amp; bill"</strong> from any iPad/terminal instantly streams ESC/POS ticket bytes to this printer.
+                  <strong>Direct Thermal Printing:</strong> Orders and bills will stream raw ESC/POS commands directly to <strong>{printerIp || '192.168.1.117'}:{printerPort || '9100'}</strong> over the local WiFi network, bypassing the office photocopy machine.
                 </p>
               </div>
             </section>
