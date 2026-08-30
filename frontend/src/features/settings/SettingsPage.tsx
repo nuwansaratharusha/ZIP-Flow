@@ -632,76 +632,131 @@ export function SettingsPage() {
               <span className="live-preview-pill">Real-time</span>
             </div>
 
-            {/* Thermal Paper Receipt Simulation */}
+            {/* Thermal Paper Receipt Simulation (Matches Physical Invoice Format) */}
             <div className="thermal-receipt-mockup">
               <div className="receipt-paper-cut-top" />
-              <div className="receipt-paper-body">
-                <div className="receipt-brand-center">
-                  <strong className="receipt-business-name">{businessName || 'Your Restaurant Name'}</strong>
-                  <span className="receipt-meta-sub">ZIP Flow Restaurant OS</span>
-                  <span className="receipt-meta-sub">Date: {new Date().toLocaleDateString()} · 19:45</span>
-                  <span className="receipt-meta-sub">Table 4 · Guest: Sarah M.</span>
+              <div className="receipt-paper-body" style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '11.5px', color: '#000000' }}>
+                <div className="receipt-brand-center" style={{ textAlign: 'center', marginBottom: 6 }}>
+                  <strong className="receipt-business-name" style={{ fontSize: '14px', display: 'block', textTransform: 'uppercase' }}>
+                    {businessName || 'RESTAURANT KAMU - GALLE'}
+                  </strong>
+                  <span style={{ fontSize: '10px', display: 'block', textTransform: 'uppercase' }}>
+                    PREMADASAS LUXURY VILLAS &amp; SPA (PVT) LTD.
+                  </span>
+                  <span style={{ fontSize: '9.5px', display: 'block', textTransform: 'uppercase' }}>
+                    NO: 24, HOSPITAL STREET, GALLE FORT.
+                  </span>
+                  <span style={{ fontSize: '9.5px', display: 'block', textTransform: 'uppercase' }}>
+                    SRI LANKA.
+                  </span>
+                  <span style={{ fontSize: '9px', display: 'block', textTransform: 'uppercase', fontWeight: 700 }}>
+                    TEL : +94 91 2222173 FAX : +94 91 2231973
+                  </span>
                 </div>
 
-                <div className="receipt-line-divider" />
+                <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
 
-                <div className="receipt-sample-items">
-                  <div className="mockup-line">
-                    <span>1× Ribeye Steak</span>
-                    <span>{currencySymbol}65.00</span>
-                  </div>
-                  <div className="mockup-line-note">· Medium rare, peppercorn sauce</div>
-
-                  <div className="mockup-line">
-                    <span>2× Signature Cocktails</span>
-                    <span>{currencySymbol}35.00</span>
-                  </div>
-
-                  <div className="mockup-line">
-                    <span>1× Tiramisu Dessert</span>
-                    <span>{currencySymbol}20.00</span>
-                  </div>
+                <div style={{ textAlign: 'center', fontWeight: 900, fontSize: '13px', letterSpacing: '0.06em' }}>
+                  SALES INVOICE
                 </div>
 
-                <div className="receipt-line-divider" />
+                <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
 
-                <div className="receipt-mockup-totals">
-                  <div className="mockup-total-row">
-                    <span>Subtotal</span>
-                    <span>{currencySymbol}{sampleSubtotal.toFixed(2)}</span>
-                  </div>
-                  {sampleScNum > 0 && (
-                    <div className="mockup-total-row">
-                      <span>Service Charge ({sampleScNum}%)</span>
-                      <span>{currencySymbol}{sampleScAmount.toFixed(2)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', fontWeight: 700 }}>
+                  <span>G000030140</span>
+                  <span>29-01-2019</span>
+                  <span>12:48:52</span>
+                </div>
+
+                <div style={{ margin: '8px 0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '11px' }}>CHICKEN OR FRIED NOODLES</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '40px 60px 1fr', fontSize: '11px' }}>
+                      <span>1.00</span>
+                      <span>750.00</span>
+                      <span style={{ textAlign: 'right', fontWeight: 700 }}>750.00</span>
                     </div>
-                  )}
-                  {sampleVatNum > 0 && (
-                    <div className="mockup-total-row">
-                      <span>VAT ({sampleVatNum}%)</span>
-                      <span>{currencySymbol}{sampleVatAmount.toFixed(2)}</span>
+                  </div>
+
+                  <div>
+                    <div style={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '11px' }}>MIXED FRUIT JUICE</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '40px 60px 1fr', fontSize: '11px' }}>
+                      <span>1.00</span>
+                      <span>599.99</span>
+                      <span style={{ textAlign: 'right', fontWeight: 700 }}>599.99</span>
                     </div>
-                  )}
-                  <div className="mockup-total-row total-row-grand">
-                    <strong>TOTAL</strong>
-                    <strong>{currencySymbol}{sampleTotal.toFixed(2)}</strong>
+                  </div>
+
+                  <div>
+                    <div style={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '11px' }}>WATER BOTTLE 500ML</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '40px 60px 1fr', fontSize: '11px' }}>
+                      <span>1.00</span>
+                      <span>149.98</span>
+                      <span style={{ textAlign: 'right', fontWeight: 700 }}>149.98</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="receipt-line-divider" />
+                <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
 
-                {showTaxId && (
-                  <p className="receipt-tax-id-line">
-                    VAT / Tax ID: {taxId || 'VAT-SAMPLE-12345'}
-                  </p>
-                )}
-
-                <p className="receipt-footer-text">{footerMessage || 'Thank you for your visit!'}</p>
-
-                <div className="receipt-barcode-simulation">
-                  <div className="barcode-bars" />
-                  <small>ORDER #1042 · TABLE 4</small>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '12px' }}>
+                  <span>NET AMOUNT</span>
+                  <span>1,499.97</span>
                 </div>
+
+                <div style={{ margin: '6px 0', fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>CASH</span>
+                    <span>1499.98</span>
+                  </div>
+                  <div>CHEQUE</div>
+                  <div>CREDIT</div>
+                  <div>OTHER</div>
+                </div>
+
+                <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
+
+                <div style={{ fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>TENDED</span>
+                    <span>1499.98</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>BALANCE</span>
+                    <span>0.00</span>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
+
+                <div style={{ fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>* TOTAL DISCOUNT</span>
+                    <span>0.00</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>* NUMBER OF ITEM</span>
+                    <span>3</span>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px' }}>
+                  <span>TOTAL CREDIT</span>
+                  <span>0.00</span>
+                </div>
+
+                <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
+
+                <p style={{ textAlign: 'center', fontSize: '11.5px', fontWeight: 800, margin: '8px 0 2px' }}>
+                  {footerMessage || 'Thanks and Come again!!!!'}
+                </p>
+                <p style={{ textAlign: 'center', fontSize: '9.5px', fontWeight: 700, margin: '2px 0 6px' }}>
+                  Software By ZIP Flow POS
+                </p>
+
+                <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
               </div>
               <div className="receipt-paper-cut-bottom" />
             </div>

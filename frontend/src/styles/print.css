@@ -1,6 +1,7 @@
 /* ==========================================================================
    Order Print Page (Thermal Bill & Round Tickets)
-   Optimized for 80mm & 58mm POS thermal printers (e.g. Epson TM-m30II)
+   Optimized for 80mm POS Thermal Printers (Epson TM-m30II) & Screen Preview
+   Exact layout aligned to Restaurant Sales Invoice format
    ========================================================================== */
 
 /* Page Viewport on Screen */
@@ -11,8 +12,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  color: #0f172a;
+  font-family: "Courier New", Courier, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #000000;
 }
 
 /* On-Screen Action Header Banner */
@@ -28,6 +29,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .receipt-control-bar-top {
@@ -71,13 +73,14 @@
   background: #0f172a;
   color: #ffffff;
   border: 1px solid #0f172a;
-  padding: 8px 14px;
+  padding: 9px 14px;
   border-radius: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.12s;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  touch-action: manipulation;
 }
 
 .receipt-print-direct-btn:hover:not(:disabled) {
@@ -99,12 +102,13 @@
   background: #ffffff;
   color: #475569;
   border: 1px solid #cbd5e1;
-  padding: 8px 12px;
+  padding: 9px 12px;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 650;
   cursor: pointer;
   transition: all 0.12s;
+  touch-action: manipulation;
 }
 
 .receipt-print-browser-btn:hover {
@@ -114,264 +118,217 @@
 }
 
 .receipt-back-link {
-  font-size: 11.5px;
+  font-size: 12px;
   color: #64748b;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-weight: 600;
 }
 
 .receipt-back-link:hover {
   color: #0f172a;
 }
 
-/* Physical Thermal Paper Layout Simulation */
+/* ==========================================================================
+   Physical 80mm Thermal Receipt Layout (Exact Match to Physical Invoice)
+   ========================================================================== */
 .receipt-sheet {
   width: 100%;
-  max-width: 360px;
+  max-width: 380px;
   background: #ffffff;
   border: 1px solid #e2e8f0;
   box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
-  padding: 24px 20px;
+  padding: 24px 22px;
   border-radius: 6px;
   box-sizing: border-box;
   color: #000000;
+  font-family: "Courier New", Courier, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
-/* Header Branding */
+/* Header Section */
 .receipt-brand-header {
   text-align: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .receipt-business-name {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: -0.01em;
-  margin: 0 0 4px;
-  line-height: 1.2;
+  margin: 0 0 3px;
+  line-height: 1.25;
   color: #000000;
 }
 
-.receipt-doc-title {
+.receipt-company-subtitle {
   font-size: 11.5px;
   font-weight: 750;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0 0 2px;
+  margin: 0 0 3px;
+  line-height: 1.3;
 }
 
-.receipt-meta-line {
-  font-size: 11.5px;
+.receipt-address-line {
+  font-size: 11px;
+  text-transform: uppercase;
   margin: 2px 0;
-  line-height: 1.35;
-  color: #111111;
+  line-height: 1.3;
 }
 
-.receipt-meta-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  font-size: 11.5px;
-  gap: 2px 8px;
-  margin: 6px 0;
+.receipt-contact-line {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  margin: 3px 0 0;
+  line-height: 1.3;
+  font-weight: 700;
 }
 
-.receipt-meta-grid span:nth-child(even) {
-  text-align: right;
-}
-
-/* Divider Lines */
+/* Dashed Dividers */
 .receipt-divider {
   border: none;
-  border-top: 1px dashed #333333;
-  margin: 10px 0;
+  border-top: 1px dashed #000000;
+  margin: 8px 0;
   width: 100%;
 }
 
 .receipt-divider-double {
   border: none;
   border-top: 2px dashed #000000;
-  margin: 10px 0;
+  margin: 8px 0;
   width: 100%;
 }
 
-/* Round / Section Headers */
-.print-round-heading {
+/* Document Title */
+.receipt-invoice-title {
   text-align: center;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 14.5px;
+  font-weight: 900;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin: 8px 0 6px;
+  letter-spacing: 0.08em;
+  margin: 6px 0;
   color: #000000;
 }
 
-/* Line Items List */
-.receipt-lines {
+/* Metadata Bar: [Code] [Date] [Time] */
+.invoice-meta-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 6px 0;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 6px 0 4px;
 }
 
-.receipt-line {
+.invoice-meta-subrow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: #111111;
+  margin-bottom: 8px;
+}
+
+/* Items List */
+.invoice-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.invoice-item-block {
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
-.receipt-line-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.3;
-}
-
-.receipt-line-left {
-  display: flex;
-  gap: 5px;
-  align-items: baseline;
-  flex: 1;
-  padding-right: 8px;
+.invoice-item-name {
+  font-size: 13px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  color: #000000;
   word-break: break-word;
+  line-height: 1.25;
 }
 
-.receipt-line-qty {
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.receipt-line-name {
+.invoice-item-cols {
+  display: grid;
+  grid-template-columns: 55px 95px 1fr;
+  font-size: 13px;
   font-weight: 600;
+  align-items: baseline;
 }
 
-.receipt-line-unit-price {
-  font-size: 11px;
-  color: #444444;
-  white-space: nowrap;
+.invoice-col-qty {
+  text-align: left;
 }
 
-.receipt-line-total {
-  font-weight: 750;
-  font-size: 12.5px;
-  white-space: nowrap;
+.invoice-col-price {
+  text-align: left;
+}
+
+.invoice-col-total {
   text-align: right;
+  font-weight: 800;
 }
 
-.receipt-line-note {
-  font-size: 10.5px;
+.invoice-item-note {
+  font-size: 11px;
   font-style: italic;
   color: #333333;
-  margin: 1px 0 0 16px;
-  line-height: 1.2;
+  margin: 1px 0 0 12px;
 }
 
-/* Round Subtotal */
-.print-bill-round {
-  margin-bottom: 6px;
-}
-
-.print-bill-round-total {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11.5px;
-  font-weight: 750;
-  margin: 5px 0 0;
-}
-
-/* Totals Summary */
-.receipt-totals {
+/* Summary & Totals */
+.invoice-summary-table {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin: 6px 0;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
-.receipt-totals > div {
+.invoice-summary-row {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
-  font-weight: 600;
+  align-items: center;
+}
+
+.invoice-net-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 900;
+  color: #000000;
+  padding: 2px 0;
+}
+
+.invoice-payment-method {
+  font-size: 12.5px;
+}
+
+/* Footer Section */
+.invoice-footer-thanks {
+  text-align: center;
+  font-size: 13.5px;
+  font-weight: 850;
+  margin: 10px 0 4px;
   line-height: 1.3;
 }
 
-.receipt-total-line {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 15px !important;
-  font-weight: 900 !important;
-  border-top: 1.5px dashed #000000;
-  border-bottom: 1.5px dashed #000000;
-  padding: 6px 0;
-  margin-top: 6px;
-}
-
-.receipt-tax-id-line {
+.invoice-software-by {
+  text-align: center;
   font-size: 11px;
-  text-align: center;
-  margin: 4px 0;
-}
-
-/* Footer Notes & Barcode */
-.receipt-footer-message {
-  font-size: 11.5px;
-  text-align: center;
-  margin: 12px 0 4px;
-  line-height: 1.35;
-}
-
-.receipt-powered-by {
-  font-size: 9.5px;
-  text-align: center;
-  color: #555555;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin: 6px 0 0;
-}
-
-.receipt-barcode-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  margin-top: 12px;
-  padding-top: 8px;
-}
-
-.receipt-barcode-lines {
-  height: 24px;
-  width: 150px;
-  background: repeating-linear-gradient(
-    90deg,
-    #000 0px,
-    #000 2px,
-    transparent 2px,
-    transparent 4px,
-    #000 4px,
-    #000 7px,
-    transparent 7px,
-    transparent 9px,
-    #000 9px,
-    #000 10px,
-    transparent 10px,
-    transparent 13px,
-    #000 13px,
-    #000 16px,
-    transparent 16px,
-    transparent 18px,
-    #000 18px,
-    #000 22px
-  );
-}
-
-.receipt-barcode-text {
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  font-weight: 700;
+  margin: 2px 0 6px;
+  letter-spacing: 0.02em;
 }
 
 /* ==========================================================================
@@ -388,7 +345,8 @@
     padding: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
-    font-size: 12px !important;
+    font-size: 12.5px !important;
+    font-family: "Courier New", Courier, monospace !important;
   }
 
   .no-print {
@@ -408,19 +366,7 @@
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
-    padding: 4mm 2mm !important;
+    padding: 3mm 1.5mm !important;
     margin: 0 auto !important;
-  }
-
-  .receipt-business-name {
-    font-size: 16px !important;
-  }
-
-  .receipt-line-row, .receipt-totals > div {
-    font-size: 11.5px !important;
-  }
-
-  .receipt-total-line {
-    font-size: 14px !important;
   }
 }

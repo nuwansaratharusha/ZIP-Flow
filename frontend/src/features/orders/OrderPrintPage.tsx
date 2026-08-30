@@ -1,38 +1,39 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { formatMoney } from '../../lib/currency'
 import { getOrder, printBill, printRound } from './api'
-import type { Order, OrderRound } from './types'
+import type { Order, OrderLine, OrderRound } from './types'
 import { getPrinterSettings, getReceiptSettings } from '../settings/api'
 import type { PrinterSettings, ReceiptSettings } from '../settings/types'
 import { Icon } from '../../components/Icon'
 import '../../styles/print.css'
 
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
-  year: 'numeric',
-  month: 'short',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-})
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr)
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const year = d.getFullYear()
+  return `${day}-${month}-${year}`
+}
 
-function OrderLines({ round, currencySymbol }: { round: OrderRound; currencySymbol: string }) {
+function formatTime(dateStr: string) {
+  const d = new Date(dateStr)
+  const hours = String(d.getHours()).padStart(2, '0')
+  const mins = String(d.getMinutes()).padStart(2, '0')
+  const secs = String(d.getSeconds()).padStart(2, '0')
+  return `${hours}:${mins}:${secs}`
+}
+
+function InvoiceItemRow({ line }: { line: OrderLine }) {
   return (
-    <div className="receipt-lines">
-      {round.lines.map((line, index) => (
-        <div className="receipt-line" key={index}>
-          <div className="receipt-line-row">
-            <div className="receipt-line-left">
-              <span className="receipt-line-qty">{line.quantity}×</span>
-              <span className="receipt-line-name">{line.name}</span>
-              <span className="receipt-line-unit-price">@ {formatMoney(line.price, currencySymbol)}</span>
-            </div>
-            <span className="receipt-line-total">{formatMoney(line.lineTotal, currencySymbol)}</span>
-          </div>
-          {line.notes && <p className="receipt-line-note">↳ {line.notes}</p>}
-        </div>
-      ))}
+    <div className="invoice-item-block">
+      <div className="invoice-item-name">{line.name.toUpperCase()}</div>
+      <div className="invoice-item-cols">
+        <span className="invoice-col-qty">{line.quantity.toFixed(2)}</span>
+        <span className="invoice-col-price">{line.price.toFixed(2)}</span>
+        <span className="invoice-col-total">{line.lineTotal.toFixed(2)}</span>
+      </div>
+      {line.notes && <p className="invoice-item-note">* Note: {line.notes}</p>}
     </div>
   )
 }
@@ -132,9 +133,20 @@ export function OrderPrintPage() {
     ? `Epson TM-m30II (${printer.ipAddress})`
     : 'Epson TM-m30II (192.168.1.117)'
 
+  const orderCode = `G${order.orderNumber.toString().padStart(8, '0')}`
+  const dateFormatted = formatDate(order.createdAt)
+  const timeFormatted = formatTime(order.createdAt)
+
+  // Calculate items count
+  const allLines = requestedRound !== null && round
+    ? round.lines
+    : order.rounds.flatMap((r) => r.lines)
+  const totalItemCount = allLines.reduce((sum, l) => sum + l.quantity, 0)
+  const totalAmount = requestedRound !== null && round ? round.roundTotal : order.total
+
   return (
     <main className="receipt-page">
-      {/* On-screen control bar (Hidden on physical print output) */}
+      {/* On-screen control bar (Hidden during physical browser/AirPrint) */}
       <div className="receipt-control-bar no-print">
         <div className="receipt-control-bar-top">
           <Link to="/orders" className="receipt-back-link">
@@ -179,100 +191,120 @@ export function OrderPrintPage() {
 
       {/* 80mm Physical Thermal Receipt Simulation */}
       <div className="receipt-sheet">
+        {/* Header (Centered Restaurant Branding) */}
         <div className="receipt-brand-header">
-          <h1 className="receipt-business-name">{settings.businessName || session?.tenant.name || 'ZIP Flow Restaurant'}</h1>
-          <p className="receipt-doc-title">
-            {round ? `Kitchen Pass — Round #${round.roundNumber}` : 'Customer Bill / Receipt'}
-          </p>
-          <p className="receipt-meta-line">{dateTimeFormat.format(new Date(order.createdAt))}</p>
+          <h1 className="receipt-business-name">
+            {settings.businessName || session?.tenant.name || 'RESTAURANT KAMU - GALLE'}
+          </h1>
+          <p className="receipt-company-subtitle">PREMADASAS LUXURY VILLAS &amp; SPA (PVT) LTD.</p>
+          <p className="receipt-address-line">NO: 24, HOSPITAL STREET, GALLE FORT.</p>
+          <p className="receipt-address-line">SRI LANKA.</p>
+          <p className="receipt-contact-line">TEL : +94 91 2222173 FAX : +94 91 2231973</p>
         </div>
 
         <hr className="receipt-divider" />
 
-        <div className="receipt-meta-grid">
-          <span><strong>Order:</strong> #{order.orderNumber}</span>
-          <span><strong>Table:</strong> {order.tableName}</span>
-          <span><strong>Server:</strong> {session?.user?.displayName ?? 'Staff'}</span>
-          <span><strong>Guest:</strong> {order.customerName}</span>
+        {/* Document Title */}
+        <h2 className="receipt-invoice-title">
+          {round ? `KITCHEN PASS - ROUND #${round.roundNumber}` : 'SALES INVOICE'}
+        </h2>
+
+        <hr className="receipt-divider" />
+
+        {/* Metadata Line: [Invoice #] [Date] [Time] */}
+        <div className="invoice-meta-row">
+          <span>{orderCode}</span>
+          <span>{dateFormatted}</span>
+          <span>{timeFormatted}</span>
+        </div>
+        <div className="invoice-meta-subrow">
+          <span>Table: {order.tableName}</span>
+          <span>Server: {session?.user?.displayName ?? 'Staff'}</span>
+        </div>
+
+        {/* Items Listing */}
+        <div className="invoice-items-list">
+          {allLines.map((line, idx) => (
+            <InvoiceItemRow key={idx} line={line} />
+          ))}
         </div>
 
         <hr className="receipt-divider" />
 
-        {round ? (
-          <>
-            <p className="print-round-heading">Round {round.roundNumber}</p>
-            <OrderLines round={round} currencySymbol={order.currencySymbol} />
-
-            <hr className="receipt-divider" />
-
-            <div className="receipt-totals">
-              <div>
-                <span>Round Total</span>
-                <span>{formatMoney(round.roundTotal, order.currencySymbol)}</span>
-              </div>
-              <div className="receipt-total-line">
-                <span>Table Running Total</span>
-                <span>
-                  {formatMoney(
-                    order.rounds
-                      .filter((r) => r.roundNumber <= round.roundNumber)
-                      .reduce((sum, r) => sum + r.roundTotal, 0),
-                    order.currencySymbol,
-                  )}
-                </span>
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            {order.rounds.map((r) => (
-              <div className="print-bill-round" key={r.id}>
-                <p className="print-round-heading">Round {r.roundNumber}</p>
-                <OrderLines round={r} currencySymbol={order.currencySymbol} />
-                <div className="print-bill-round-total">
-                  <span>Round Total</span>
-                  <span>{formatMoney(r.roundTotal, order.currencySymbol)}</span>
-                </div>
-                <hr className="receipt-divider" />
-              </div>
-            ))}
-
-            <div className="receipt-totals">
-              <div>
-                <span>Subtotal</span>
-                <span>{formatMoney(order.subtotal, order.currencySymbol)}</span>
-              </div>
-              {order.serviceCharge > 0 && (
-                <div>
-                  <span>Service Charge</span>
-                  <span>{formatMoney(order.serviceCharge, order.currencySymbol)}</span>
-                </div>
-              )}
-              <div>
-                <span>VAT / Tax</span>
-                <span>{formatMoney(order.tax, order.currencySymbol)}</span>
-              </div>
-              <div className="receipt-total-line">
-                <span>TOTAL DUE</span>
-                <span>{formatMoney(order.total, order.currencySymbol)}</span>
-              </div>
-            </div>
-
-            <hr className="receipt-divider-double" />
-
-            {settings.showTaxId && settings.taxId && (
-              <p className="receipt-tax-id-line">VAT / Tax ID: {settings.taxId}</p>
-            )}
-          </>
-        )}
-
-        <p className="receipt-footer-message">{settings.footerMessage || 'Thank you for your visit!'}</p>
-        <p className="receipt-powered-by">Powered by ZIP Flow POS</p>
-
-        <div className="receipt-barcode-box">
-          <div className="receipt-barcode-lines" />
-          <span className="receipt-barcode-text">ORDER #{order.orderNumber} · {order.tableName}</span>
+        {/* Financial Net Amount */}
+        <div className="invoice-net-row">
+          <span>NET AMOUNT</span>
+          <span>{totalAmount.toFixed(2)}</span>
         </div>
+
+        <div style={{ height: 6 }} />
+
+        {/* Payment Breakdown */}
+        <div className="invoice-summary-table">
+          <div className="invoice-summary-row">
+            <span>CASH</span>
+            <span>{totalAmount.toFixed(2)}</span>
+          </div>
+          <div className="invoice-summary-row">
+            <span>CHEQUE</span>
+            <span></span>
+          </div>
+          <div className="invoice-summary-row">
+            <span>CREDIT</span>
+            <span></span>
+          </div>
+          <div className="invoice-summary-row">
+            <span>OTHER</span>
+            <span></span>
+          </div>
+        </div>
+
+        <hr className="receipt-divider" />
+
+        {/* Tended and Balance */}
+        <div className="invoice-summary-table">
+          <div className="invoice-summary-row">
+            <span>TENDED</span>
+            <span>{totalAmount.toFixed(2)}</span>
+          </div>
+          <div className="invoice-summary-row">
+            <span>BALANCE</span>
+            <span>0.00</span>
+          </div>
+        </div>
+
+        <hr className="receipt-divider" />
+
+        {/* Statistics Breakdown */}
+        <div className="invoice-summary-table">
+          <div className="invoice-summary-row">
+            <span>* TOTAL DISCOUNT</span>
+            <span>0.00</span>
+          </div>
+          <div className="invoice-summary-row">
+            <span>* NUMBER OF ITEM</span>
+            <span>{totalItemCount}</span>
+          </div>
+        </div>
+
+        <hr className="receipt-divider" />
+
+        <div className="invoice-summary-table">
+          <div className="invoice-summary-row">
+            <span>TOTAL CREDIT</span>
+            <span>0.00</span>
+          </div>
+        </div>
+
+        <hr className="receipt-divider" />
+
+        {/* Footer Thanks & Software Branding */}
+        <p className="invoice-footer-thanks">
+          {settings.footerMessage || 'Thanks and Come again!!!!'}
+        </p>
+        <p className="invoice-software-by">Software By ZIP Flow POS</p>
+
+        <hr className="receipt-divider" />
       </div>
     </main>
   )

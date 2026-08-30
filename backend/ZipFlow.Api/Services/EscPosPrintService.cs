@@ -21,7 +21,7 @@ public interface IEscPosPrintService
 
 /// <summary>
 /// Formats and streams raw ESC/POS commands to network thermal printers (such as Epson TM-m30II)
-/// over TCP port 9100. Handles centering, bolding, character column alignment, and clean cutting.
+/// over TCP port 9100. Formatted strictly for standard 80mm / 42-column restaurant invoice layouts.
 /// </summary>
 public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEscPosPrintService
 {
@@ -39,7 +39,6 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
 
     private const int LineWidth = 42; // Standard 80mm Font A characters per line
     private static readonly string SingleDivider = new('-', LineWidth);
-    private static readonly string DoubleDivider = new('=', LineWidth);
 
     public Task PrintRoundTicketAsync(
         string ipAddress, int port, string businessName, int orderNumber, string tableName,
@@ -51,45 +50,52 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
         // Header
         ms.Write(CmdAlignCenter);
         ms.Write(CmdBoldOn);
-        ms.Write(CmdDoubleHeightOn);
-        WriteString(ms, $"{businessName}\n");
+        WriteString(ms, $"{businessName.ToUpperInvariant()}\n");
         ms.Write(CmdNormalText);
+        WriteString(ms, $"{SingleDivider}\n");
         ms.Write(CmdBoldOn);
         WriteString(ms, $"KITCHEN PASS - ROUND #{round.RoundNumber}\n");
         ms.Write(CmdBoldOff);
-        WriteString(ms, $"{DateTime.Now:dd MMM yyyy, HH:mm}\n");
+        WriteString(ms, $"{DateTime.Now:dd-MM-yyyy   HH:mm:ss}\n");
         WriteString(ms, $"{SingleDivider}\n");
 
         // Order & Table Info
         ms.Write(CmdAlignLeft);
-        ms.Write(CmdBoldOn);
-        WriteString(ms, $"Order: #{orderNumber}   Table: {tableName}\n");
+        var orderCode = $"G{orderNumber:D8}";
+        WriteString(ms, $"{FormatTwoColumn(orderCode, $"Table: {tableName}")}\n");
         if (!string.IsNullOrWhiteSpace(customerName))
             WriteString(ms, $"Guest: {customerName}\n");
-        ms.Write(CmdBoldOff);
-        WriteString(ms, $"{SingleDivider}\n");
+        WriteString(ms, $"{SingleDivider}\n\n");
 
         // Items
+        int roundItemCount = 0;
         foreach (var line in round.Lines)
         {
+            roundItemCount += line.Quantity;
             ms.Write(CmdBoldOn);
-            var itemLine = FormatTwoColumn($"{line.Quantity}x {line.Name}", $"{currencyCode} {line.LineTotal:0.00}");
-            WriteString(ms, $"{itemLine}\n");
+            WriteString(ms, $"{line.Name.ToUpperInvariant()}\n");
             ms.Write(CmdBoldOff);
+
+            var qtyStr = $"{line.Quantity:0.00}";
+            var unitPriceStr = $"{line.Price:0.00}";
+            var totalStr = $"{line.LineTotal:0.00}";
+            WriteString(ms, $"{FormatThreeColumn(qtyStr, unitPriceStr, totalStr)}\n");
 
             if (!string.IsNullOrWhiteSpace(line.Notes))
             {
                 WriteString(ms, $"   * Note: {line.Notes}\n");
             }
+            WriteString(ms, "\n");
         }
 
         WriteString(ms, $"{SingleDivider}\n");
 
         // Round Total
         ms.Write(CmdBoldOn);
-        WriteString(ms, $"{FormatTwoColumn("ROUND TOTAL", $"{currencyCode} {round.RoundTotal:0.00}")}\n");
+        WriteString(ms, $"{FormatTwoColumn("ROUND TOTAL", $"{round.RoundTotal:0.00}")}\n");
         ms.Write(CmdBoldOff);
-        WriteString(ms, $"{DoubleDivider}\n");
+        WriteString(ms, $"{FormatTwoColumn("* NUMBER OF ITEM", $"{roundItemCount}")}\n");
+        WriteString(ms, $"{SingleDivider}\n");
 
         // Footer Cut
         ms.Write(CmdFeedAndCut);
@@ -103,72 +109,95 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
         using var ms = new MemoryStream();
         ms.Write(CmdInit);
 
-        // Header
+        // Header (Centered Restaurant Branding)
         ms.Write(CmdAlignCenter);
         ms.Write(CmdBoldOn);
-        ms.Write(CmdDoubleSizeOn);
-        WriteString(ms, $"{businessName}\n");
-        ms.Write(CmdNormalText);
-        WriteString(ms, "CUSTOMER RECEIPT / BILL\n");
-        WriteString(ms, $"{DateTime.Now:dd MMM yyyy, HH:mm}\n");
+        WriteString(ms, $"{businessName.ToUpperInvariant()}\n");
+        ms.Write(CmdBoldOff);
         WriteString(ms, $"{SingleDivider}\n");
 
-        // Order Info
+        // Document Title
+        ms.Write(CmdBoldOn);
+        WriteString(ms, "SALES INVOICE\n");
+        ms.Write(CmdBoldOff);
+        WriteString(ms, $"{SingleDivider}\n");
+
+        // Metadata Header Line: [Invoice/Order#] [Date] [Time]
         ms.Write(CmdAlignLeft);
-        WriteString(ms, $"Order: #{order.OrderNumber}\n");
-        WriteString(ms, $"Table: {order.TableName}\n");
-        if (!string.IsNullOrWhiteSpace(order.CustomerName))
-            WriteString(ms, $"Guest: {order.CustomerName}\n");
-        WriteString(ms, $"{SingleDivider}\n");
+        var orderCode = $"G{order.OrderNumber:D8}";
+        var dateStr = order.CreatedAt.ToString("dd-MM-yyyy");
+        var timeStr = order.CreatedAt.ToString("HH:mm:ss");
 
-        // Itemized Rounds
+        var metaLeft = $"{orderCode}    {dateStr}";
+        WriteString(ms, $"{FormatTwoColumn(metaLeft, timeStr)}\n");
+        if (!string.IsNullOrWhiteSpace(order.TableName))
+        {
+            var tableDisplay = $"Table: {order.TableName}";
+            var guestDisplay = string.IsNullOrWhiteSpace(order.CustomerName) ? "" : $"Guest: {order.CustomerName}";
+            WriteString(ms, $"{FormatTwoColumn(tableDisplay, guestDisplay)}\n");
+        }
+        WriteString(ms, "\n");
+
+        // Itemized Lines
+        int totalItemCount = 0;
         foreach (var round in order.Rounds.OrderBy(r => r.RoundNumber))
         {
-            ms.Write(CmdBoldOn);
-            WriteString(ms, $"--- Round {round.RoundNumber} ---\n");
-            ms.Write(CmdBoldOff);
-
             foreach (var line in round.Lines)
             {
-                var lineLeft = $"{line.Quantity}x {line.Name}";
-                var lineRight = $"{order.CurrencyCode} {line.LineTotal:0.00}";
-                WriteString(ms, $"{FormatTwoColumn(lineLeft, lineRight)}\n");
+                totalItemCount += line.Quantity;
+
+                // Line 1: Item Name in Uppercase
+                ms.Write(CmdBoldOn);
+                WriteString(ms, $"{line.Name.ToUpperInvariant()}\n");
+                ms.Write(CmdBoldOff);
+
+                // Line 2: 3 Columns (Quantity, Unit Price, Line Total)
+                var qtyStr = $"{line.Quantity:0.00}";
+                var unitPriceStr = $"{line.Price:0.00}";
+                var totalStr = $"{line.LineTotal:0.00}";
+                WriteString(ms, $"{FormatThreeColumn(qtyStr, unitPriceStr, totalStr)}\n");
 
                 if (!string.IsNullOrWhiteSpace(line.Notes))
                 {
-                    WriteString(ms, $"   * {line.Notes}\n");
+                    WriteString(ms, $"   * Note: {line.Notes}\n");
                 }
+                WriteString(ms, "\n");
             }
         }
 
         WriteString(ms, $"{SingleDivider}\n");
 
-        // Financial Totals
-        WriteString(ms, $"{FormatTwoColumn("Subtotal", $"{order.CurrencyCode} {order.Subtotal:0.00}")}\n");
-
-        if (order.ServiceCharge > 0)
-        {
-            WriteString(ms, $"{FormatTwoColumn("Service Charge", $"{order.CurrencyCode} {order.ServiceCharge:0.00}")}\n");
-        }
-
-        WriteString(ms, $"{FormatTwoColumn("VAT / Tax", $"{order.CurrencyCode} {order.Tax:0.00}")}\n");
-        WriteString(ms, $"{DoubleDivider}\n");
-
-        // Grand Total (Emphasized)
+        // NET AMOUNT
         ms.Write(CmdBoldOn);
-        ms.Write(CmdDoubleHeightOn);
-        WriteString(ms, $"{FormatTwoColumn("TOTAL DUE", $"{order.CurrencyCode} {order.Total:0.00}")}\n");
-        ms.Write(CmdNormalText);
+        WriteString(ms, $"{FormatTwoColumn("NET AMOUNT", $"{order.Total:0.00}")}\n");
         ms.Write(CmdBoldOff);
-        WriteString(ms, $"{DoubleDivider}\n");
+        WriteString(ms, "\n");
+
+        // Payment Method Breakdown Lines
+        WriteString(ms, $"{FormatTwoColumn("CASH", $"{order.Total:0.00}")}\n");
+        WriteString(ms, "CHEQUE\n");
+        WriteString(ms, "CREDIT\n");
+        WriteString(ms, "OTHER\n");
+        WriteString(ms, $"{SingleDivider}\n");
+
+        // Tended and Balance
+        WriteString(ms, $"{FormatTwoColumn("TENDED", $"{order.Total:0.00}")}\n");
+        WriteString(ms, $"{FormatTwoColumn("BALANCE", "0.00")}\n");
+        WriteString(ms, $"{SingleDivider}\n");
+
+        // Summary Stats
+        WriteString(ms, $"{FormatTwoColumn("* TOTAL DISCOUNT", "0.00")}\n");
+        WriteString(ms, $"{FormatTwoColumn("* NUMBER OF ITEM", $"{totalItemCount}")}\n");
+        WriteString(ms, $"{SingleDivider}\n");
+        WriteString(ms, $"{FormatTwoColumn("TOTAL CREDIT", "0.00")}\n");
+        WriteString(ms, $"{SingleDivider}\n");
 
         // Footer Message
         ms.Write(CmdAlignCenter);
-        if (!string.IsNullOrWhiteSpace(footerMessage))
-        {
-            WriteString(ms, $"{footerMessage}\n");
-        }
-        WriteString(ms, "Powered by ZIP Flow POS\n");
+        var message = string.IsNullOrWhiteSpace(footerMessage) ? "Thanks and Come again!!!!" : footerMessage;
+        WriteString(ms, $"{message}\n\n");
+        WriteString(ms, "Software By ZIP Flow POS\n");
+        WriteString(ms, $"{SingleDivider}\n");
 
         // Cut
         ms.Write(CmdFeedAndCut);
@@ -183,27 +212,54 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
 
         ms.Write(CmdAlignCenter);
         ms.Write(CmdBoldOn);
-        ms.Write(CmdDoubleSizeOn);
-        WriteString(ms, $"{businessName}\n");
-        ms.Write(CmdNormalText);
-        WriteString(ms, "==========================================\n");
-        ms.Write(CmdBoldOn);
-        WriteString(ms, "        PRINTER CONNECTION TEST           \n");
+        WriteString(ms, $"{businessName.ToUpperInvariant()}\n");
         ms.Write(CmdBoldOff);
-        WriteString(ms, "==========================================\n");
+        WriteString(ms, $"{SingleDivider}\n");
+        ms.Write(CmdBoldOn);
+        WriteString(ms, "SALES INVOICE\n");
+        ms.Write(CmdBoldOff);
+        WriteString(ms, $"{SingleDivider}\n");
 
         ms.Write(CmdAlignLeft);
-        WriteString(ms, $"Device:    Epson TM-m30II / Thermal POS\n");
-        WriteString(ms, $"IP Target: {ipAddress}:{port}\n");
-        WriteString(ms, $"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n");
-        WriteString(ms, $"Status:    Connected & Operational (OK)\n");
-        WriteString(ms, "------------------------------------------\n");
-        WriteString(ms, "Hardware communication test passed.\n");
-        WriteString(ms, "Auto-cutter mechanism: Verified.\n");
-        WriteString(ms, "==========================================\n");
+        var orderCode = "G000030140";
+        var dateStr = DateTime.Now.ToString("dd-MM-yyyy");
+        var timeStr = DateTime.Now.ToString("HH:mm:ss");
+        WriteString(ms, $"{FormatTwoColumn($"{orderCode}    {dateStr}", timeStr)}\n\n");
+
+        // Sample Items
+        WriteString(ms, "CHICKEN OR FRIED NOODLES\n");
+        WriteString(ms, $"{FormatThreeColumn("1.00", "750.00", "750.00")}\n\n");
+
+        WriteString(ms, "MIXED FRUIT JUICE\n");
+        WriteString(ms, $"{FormatThreeColumn("1.00", "599.99", "599.99")}\n\n");
+
+        WriteString(ms, "WATER BOTTLE 500ML\n");
+        WriteString(ms, $"{FormatThreeColumn("1.00", "149.98", "149.98")}\n\n");
+
+        WriteString(ms, $"{SingleDivider}\n");
+        ms.Write(CmdBoldOn);
+        WriteString(ms, $"{FormatTwoColumn("NET AMOUNT", "1499.97")}\n");
+        ms.Write(CmdBoldOff);
+        WriteString(ms, "\n");
+
+        WriteString(ms, $"{FormatTwoColumn("CASH", "1499.98")}\n");
+        WriteString(ms, "CHEQUE\n");
+        WriteString(ms, "CREDIT\n");
+        WriteString(ms, "OTHER\n");
+        WriteString(ms, $"{SingleDivider}\n");
+        WriteString(ms, $"{FormatTwoColumn("TENDED", "1499.98")}\n");
+        WriteString(ms, $"{FormatTwoColumn("BALANCE", "0.00")}\n");
+        WriteString(ms, $"{SingleDivider}\n");
+        WriteString(ms, $"{FormatTwoColumn("* TOTAL DISCOUNT", "0.00")}\n");
+        WriteString(ms, $"{FormatTwoColumn("* NUMBER OF ITEM", "3")}\n");
+        WriteString(ms, $"{SingleDivider}\n");
+        WriteString(ms, $"{FormatTwoColumn("TOTAL CREDIT", "0.00")}\n");
+        WriteString(ms, $"{SingleDivider}\n");
 
         ms.Write(CmdAlignCenter);
-        WriteString(ms, "ZIP Flow Restaurant OS\n");
+        WriteString(ms, "Thanks and Come again!!!!\n\n");
+        WriteString(ms, "Software By ZIP Flow POS\n");
+        WriteString(ms, $"{SingleDivider}\n");
 
         ms.Write(CmdFeedAndCut);
 
@@ -228,9 +284,25 @@ public sealed class EscPosPrintService(ILogger<EscPosPrintService> logger) : IEs
         return cleanLeft + new string(' ', spaces) + cleanRight;
     }
 
+    private static string FormatThreeColumn(string col1, string col2, string col3, int width = LineWidth)
+    {
+        var c1 = col1 ?? string.Empty;
+        var c2 = col2 ?? string.Empty;
+        var c3 = col3 ?? string.Empty;
+
+        const int col1Width = 10;
+        const int col2Width = 18;
+
+        var part1 = c1.PadRight(col1Width);
+        var part2 = c2.PadRight(col2Width);
+        var part3Len = Math.Max(0, width - col1Width - col2Width);
+        var part3 = c3.PadLeft(part3Len);
+
+        return part1 + part2 + part3;
+    }
+
     private static void WriteString(Stream stream, string text)
     {
-        // Convert to ISO-8859-1 / UTF-8 compatible byte stream
         var bytes = Encoding.UTF8.GetBytes(text);
         stream.Write(bytes, 0, bytes.Length);
     }
