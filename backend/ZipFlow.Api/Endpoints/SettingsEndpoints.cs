@@ -22,7 +22,9 @@ public static class SettingsEndpoints
                 ? Results.NotFound(ApiResponse<object>.Fail("Tenant not found."))
                 : Results.Ok(ApiResponse<ReceiptSettingsDto>.Ok(dto));
         })
-        .RequireAuthorization("permission:settings.receipt.view");
+        // POS staff (waiters) must READ receipt info to print bills; editing stays
+        // admin-only (settings.receipt.manage on the PUT below).
+        .RequireAuthorization("permission:pos.orders.view");
 
         group.MapPut("/receipt", async (UpdateReceiptSettingsRequest request, ICurrentRequestContext current, ISettingsService settings, CancellationToken ct) =>
         {
@@ -63,7 +65,9 @@ public static class SettingsEndpoints
                 ? Results.NotFound(ApiResponse<object>.Fail("Tenant not found."))
                 : Results.Ok(ApiResponse<PrinterSettingsDto>.Ok(dto));
         })
-        .RequireAuthorization("permission:settings.receipt.view");
+        // POS staff need to READ printer settings for the Print Bill page; editing
+        // stays admin-only (settings.receipt.manage on the PUT below).
+        .RequireAuthorization("permission:pos.orders.view");
 
         group.MapPut("/printer", async (UpdatePrinterSettingsRequest request, ICurrentRequestContext current, ISettingsService settings, CancellationToken ct) =>
         {
