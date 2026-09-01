@@ -30,6 +30,7 @@ builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ITableService, TableService>();
 builder.Services.AddScoped<ISettingsService, SettingsService>();
 builder.Services.AddScoped<IEscPosPrintService, EscPosPrintService>();
+builder.Services.AddSingleton<IServerDirectPrintQueue, ServerDirectPrintQueue>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddScoped<FoundationSeeder>();
@@ -111,6 +112,7 @@ app.MapMenuEndpoints();
 app.MapOrderEndpoints();
 app.MapTableEndpoints();
 app.MapSettingsEndpoints();
+app.MapPrintEndpoints(builder.Configuration["ServerDirectPrint:Token"] ?? string.Empty);
 
 using (var scope = app.Services.CreateScope())
 {

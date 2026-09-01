@@ -84,9 +84,12 @@ public static class OrderEndpoints
         })
         .RequireAuthorization("permission:pos.orders.manage");
 
+        // Round + bill printing are queued for the Epson via Server Direct Print:
+        // the cloud can't reach a LAN printer, so the printer polls us and collects
+        // these jobs. See PrintEndpoints / ServerDirectPrint.
         group.MapPost("/{id:guid}/rounds/{roundNumber:int}/print", async (
             Guid id, int roundNumber, ICurrentRequestContext current,
-            IOrderService orders, ISettingsService settings, IEscPosPrintService printer, CancellationToken ct) =>
+            IOrderService orders, ISettingsService settings, IServerDirectPrintQueue printQueue, CancellationToken ct) =>
         {
             var order = await orders.GetOrderAsync(current.TenantId, id, ct);
             if (order is null)
@@ -96,52 +99,31 @@ public static class OrderEndpoints
             if (round is null)
                 return Results.NotFound(ApiResponse<object>.Fail("Round not found."));
 
-            var printerSettings = await settings.GetPrinterSettingsAsync(current.TenantId, ct);
-            if (string.IsNullOrWhiteSpace(printerSettings?.IpAddress))
-                return Results.BadRequest(ApiResponse<object>.Fail("No printer configured. Set one up in Settings."));
-
             var receipt = await settings.GetReceiptSettingsAsync(current.TenantId, ct);
+            var xml = EposPrintXmlBuilder.BuildRound(receipt!.BusinessName, order, round);
+            printQueue.Enqueue(new PrintJob(
+                Guid.NewGuid().ToString("N"), xml,
+                $"round {roundNumber} order #{order.OrderNumber}", DateTimeOffset.UtcNow));
 
-            try
-            {
-                await printer.PrintRoundTicketAsync(
-                    printerSettings.IpAddress, printerSettings.Port, receipt!.BusinessName,
-                    order.OrderNumber, order.TableName, order.CustomerName, round, order.CurrencyCode, ct);
-            }
-            catch (PrinterUnavailableException ex)
-            {
-                return Results.Json(ApiResponse<object>.Fail(ex.Message), statusCode: StatusCodes.Status502BadGateway);
-            }
-
-            return Results.Ok(ApiResponse<object>.Ok(new { }));
+            return Results.Ok(ApiResponse<object>.Ok(new { queued = true }));
         })
         .RequireAuthorization("permission:pos.orders.create");
 
         group.MapPost("/{id:guid}/bill/print", async (
             Guid id, ICurrentRequestContext current,
-            IOrderService orders, ISettingsService settings, IEscPosPrintService printer, CancellationToken ct) =>
+            IOrderService orders, ISettingsService settings, IServerDirectPrintQueue printQueue, CancellationToken ct) =>
         {
             var order = await orders.GetOrderAsync(current.TenantId, id, ct);
             if (order is null)
                 return Results.NotFound(ApiResponse<object>.Fail("Order not found."));
 
-            var printerSettings = await settings.GetPrinterSettingsAsync(current.TenantId, ct);
-            if (string.IsNullOrWhiteSpace(printerSettings?.IpAddress))
-                return Results.BadRequest(ApiResponse<object>.Fail("No printer configured. Set one up in Settings."));
-
             var receipt = await settings.GetReceiptSettingsAsync(current.TenantId, ct);
+            var xml = EposPrintXmlBuilder.BuildBill(receipt!.BusinessName, receipt.FooterMessage, order);
+            printQueue.Enqueue(new PrintJob(
+                Guid.NewGuid().ToString("N"), xml,
+                $"bill order #{order.OrderNumber}", DateTimeOffset.UtcNow));
 
-            try
-            {
-                await printer.PrintBillAsync(
-                    printerSettings.IpAddress, printerSettings.Port, receipt!.BusinessName, receipt.FooterMessage, order, ct);
-            }
-            catch (PrinterUnavailableException ex)
-            {
-                return Results.Json(ApiResponse<object>.Fail(ex.Message), statusCode: StatusCodes.Status502BadGateway);
-            }
-
-            return Results.Ok(ApiResponse<object>.Ok(new { }));
+            return Results.Ok(ApiResponse<object>.Ok(new { queued = true }));
         })
         .RequireAuthorization("permission:pos.orders.manage");
 

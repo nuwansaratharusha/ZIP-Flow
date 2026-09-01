@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { getOrder, printBill, printRound } from './api'
-import type { Order, OrderLine, OrderRound } from './types'
+import { getOrder } from './api'
+import type { Order, OrderLine } from './types'
 import { getPrinterSettings, getReceiptSettings } from '../settings/api'
 import type { PrinterSettings, ReceiptSettings } from '../settings/types'
 import { Icon } from '../../components/Icon'
+import { buildReceiptEposXml, printToEpson } from '../../lib/eposPrint'
 import '../../styles/print.css'
 
 function formatDate(dateStr: string) {
@@ -69,28 +70,32 @@ export function OrderPrintPage() {
     ? null
     : order?.rounds.find((r) => r.roundNumber === requestedRound) ?? null
 
+  // Print STRAIGHT from this device (iPad) to the Epson on the shop LAN via
+  // ePOS-Print — same as Lightspeed. No cloud->printer hop, so it can't pick
+  // the photocopier and doesn't depend on the printer polling anything.
   const handleDirectPrint = async () => {
-    if (!orderId) return
+    if (!order || !settings) return
+    const ip = printer?.ipAddress
+    if (!ip) {
+      setEscPosMessage({ type: 'error', text: 'No printer IP set. Add the Epson IP in Settings → Printer.' })
+      return
+    }
     setSendingEscPos(true)
     setEscPosMessage(null)
     try {
-      if (requestedRound !== null && round) {
-        await printRound(orderId, round.roundNumber)
-        setEscPosMessage({
-          type: 'success',
-          text: `Round #${round.roundNumber} ticket sent to Epson POS (${printer?.ipAddress || '192.168.1.117'})!`,
-        })
-      } else {
-        await printBill(orderId)
-        setEscPosMessage({
-          type: 'success',
-          text: `Final bill sent directly to Epson POS (${printer?.ipAddress || '192.168.1.117'})!`,
-        })
-      }
+      const xml = buildReceiptEposXml(order, settings, session?.user?.displayName ?? 'Staff', round)
+      // ePOS-Print is served on the printer's HTTP port (80), not the raw 9100 socket.
+      await printToEpson(ip, xml, 80)
+      setEscPosMessage({
+        type: 'success',
+        text: round
+          ? `Round #${round.roundNumber} sent to the Epson (${ip}).`
+          : `Bill sent to the Epson (${ip}).`,
+      })
     } catch (err) {
       setEscPosMessage({
         type: 'error',
-        text: err instanceof Error ? err.message : 'Could not stream to thermal printer.',
+        text: err instanceof Error ? err.message : 'Could not reach the printer from this device.',
       })
     } finally {
       setSendingEscPos(false)

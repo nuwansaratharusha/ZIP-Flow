@@ -6,8 +6,6 @@ services:
       POSTGRES_USER: "${POSTGRES_USER:-zipflow}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-ChangeThisLocalPassword!1}"
       POSTGRES_DB: "${POSTGRES_DB:-ZipFlow}"
-    ports:
-      - "5432:5432"
     volumes:
       - zipflow_pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,9 +24,9 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # Development keeps HTTPS-redirect off (we terminate at nginx over HTTP)
+      # and enables the FoundationSeeder admin bootstrap + Swagger.
       ASPNETCORE_ENVIRONMENT: "Development"
-      # Host must be the compose service name — containers do not share a network
-      # namespace, so "localhost" here would point the API at itself.
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-ZipFlow};Username=${POSTGRES_USER:-zipflow};Password=${POSTGRES_PASSWORD:-ChangeThisLocalPassword!1}"
       Jwt__Issuer: "ZipFlow"
       Jwt__Audience: "ZipFlow.Clients"
@@ -36,15 +34,22 @@ services:
       Jwt__AccessTokenMinutes: "15"
       Jwt__RefreshTokenDays: "30"
       Cors__AllowedOrigins__0: "${CORS_ALLOWED_ORIGIN}"
-    ports:
-      - "8080:8080"
+      # Seed the first admin + demo waiter on empty database.
+      BootstrapAdmin__Enabled: "true"
+      BootstrapAdmin__Email: "${ADMIN_EMAIL:-admin@zipflow.local}"
+      BootstrapAdmin__Password: "${ADMIN_PASSWORD:-ChangeMe123!}"
+      BootstrapAdmin__WaiterPassword: "${ADMIN_PASSWORD:-ChangeMe123!}"
+      # Epson Server Direct Print: secret token the printer includes in its poll URL.
+      ServerDirectPrint__Token: "${SDP_TOKEN}"
+    expose:
+      - "8080"
     restart: unless-stopped
 
-  frontend:
+  web:
     build:
       context: frontend
       dockerfile: Dockerfile
-    container_name: zipflow-frontend
+    container_name: zipflow-web
     depends_on:
       - api
     ports:
