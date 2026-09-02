@@ -26,6 +26,11 @@ public interface IMenuService
     Task<MenuItemDto?> SetAvailabilityAsync(Guid tenantId, Guid itemId, bool isAvailable, CancellationToken ct);
     Task<bool> ArchiveItemAsync(Guid tenantId, Guid itemId, CancellationToken ct);
     Task<CatalogDto> GetCatalogAsync(Guid tenantId, CancellationToken ct);
+
+    // --- OCR menu import helpers ---
+    Task<string> GenerateUniqueSkuAsync(Guid tenantId, string name, IReadOnlySet<string> reserved, CancellationToken ct);
+    Task<CategoryDto> FindOrCreateCategoryAsync(Guid tenantId, string name, int sortOrder, CancellationToken ct);
+    Task<bool> ItemExistsByNameAsync(Guid tenantId, string name, CancellationToken ct);
 }
 
 public sealed class MenuService(AppDbContext db) : IMenuService
@@ -162,5 +167,43 @@ public sealed class MenuService(AppDbContext db) : IMenuService
             .ToListAsync(ct);
 
         return new CatalogDto(categories, items);
+    }
+
+    // --- OCR menu import helpers ---
+
+    /// <summary>Build a clean, human-readable SKU (e.g. "CHI-001") that's unique for the
+    /// tenant and not already taken within this import batch (<paramref name="reserved"/>).</summary>
+    public async Task<string> GenerateUniqueSkuAsync(Guid tenantId, string name, IReadOnlySet<string> reserved, CancellationToken ct)
+    {
+        var letters = new string(name.ToUpperInvariant().Where(char.IsLetterOrDigit).ToArray());
+        var prefix = letters.Length >= 3 ? letters[..3] : letters.PadRight(3, 'X');
+        if (string.IsNullOrWhiteSpace(prefix)) prefix = "ITM";
+
+        for (var n = 1; n < 1000; n++)
+        {
+            var candidate = $"{prefix}-{n:D3}";
+            if (reserved.Contains(candidate)) continue;
+            var taken = await db.MenuItems.AnyAsync(x => x.TenantId == tenantId && x.Sku.ToLower() == candidate.ToLower(), ct);
+            if (!taken) return candidate;
+        }
+        return $"{prefix}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+    }
+
+    public async Task<CategoryDto> FindOrCreateCategoryAsync(Guid tenantId, string name, int sortOrder, CancellationToken ct)
+    {
+        var trimmed = name.Trim();
+        var existing = await db.Categories.FirstOrDefaultAsync(
+            x => x.TenantId == tenantId && x.IsActive && x.Name.ToLower() == trimmed.ToLower(), ct);
+        if (existing is not null)
+            return new CategoryDto(existing.Id, existing.Name, existing.SortOrder);
+
+        return await CreateCategoryAsync(tenantId, trimmed, sortOrder, ct);
+    }
+
+    public async Task<bool> ItemExistsByNameAsync(Guid tenantId, string name, CancellationToken ct)
+    {
+        var trimmed = name.Trim().ToLower();
+        return await db.MenuItems.AnyAsync(
+            x => x.TenantId == tenantId && !x.IsArchived && x.Name.ToLower() == trimmed, ct);
     }
 }
