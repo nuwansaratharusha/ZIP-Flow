@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { useToast } from '../../components/Toast'
 import { formatMoney } from '../../lib/currency'
@@ -10,10 +10,12 @@ import {
   deleteCategory,
   getCategories,
   getItems,
+  ocrCommit,
+  ocrPreview,
   setAvailability,
   updateItem,
 } from './api'
-import type { Category, MenuItem } from './types'
+import type { Category, MenuItem, OcrDraftItem } from './types'
 
 export function MenuPage() {
   const { session } = useAuth()
@@ -41,6 +43,67 @@ export function MenuPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingPrice, setEditingPrice] = useState('')
+
+  // --- Import from photo (Gemini OCR) ---
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [ocrLoading, setOcrLoading] = useState(false)
+  const [ocrDrafts, setOcrDrafts] = useState<OcrDraftItem[] | null>(null) // null = modal closed
+  const [ocrSelected, setOcrSelected] = useState<Record<number, boolean>>({})
+  const [ocrCommitting, setOcrCommitting] = useState(false)
+
+  const handlePhotoSelected = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = '' // allow re-selecting the same file later
+    if (!file) return
+
+    setOcrLoading(true)
+    try {
+      const res = await ocrPreview(file)
+      const drafts = res.items ?? []
+      if (drafts.length === 0) {
+        toast.info('No menu items could be read from that photo.')
+        return
+      }
+      const sel: Record<number, boolean> = {}
+      drafts.forEach((d, i) => (sel[i] = !d.duplicate)) // pre-tick everything except duplicates
+      setOcrDrafts(drafts)
+      setOcrSelected(sel)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to read the photo.')
+    } finally {
+      setOcrLoading(false)
+    }
+  }
+
+  const updateDraft = (index: number, patch: Partial<OcrDraftItem>) =>
+    setOcrDrafts((prev) => (prev ? prev.map((d, i) => (i === index ? { ...d, ...patch } : d)) : prev))
+
+  const handleOcrCommit = async () => {
+    if (!ocrDrafts) return
+    const chosen = ocrDrafts
+      .filter((_, i) => ocrSelected[i])
+      .map((d) => ({ name: d.name.trim(), price: Number(d.price), category: d.category.trim(), sku: d.sku.trim() }))
+      .filter((d) => d.name && Number.isFinite(d.price) && d.price >= 0)
+
+    if (chosen.length === 0) {
+      toast.warning('Tick at least one item to add.')
+      return
+    }
+
+    setOcrCommitting(true)
+    try {
+      const res = await ocrCommit(chosen)
+      setOcrDrafts(null)
+      await refetch()
+      toast.success(`Added ${res.created} item${res.created === 1 ? '' : 's'}${res.skipped ? ` · skipped ${res.skipped}` : ''}.`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add items.')
+    } finally {
+      setOcrCommitting(false)
+    }
+  }
+
+  const ocrSelectedCount = ocrDrafts ? ocrDrafts.filter((_, i) => ocrSelected[i]).length : 0
 
   const categoryName_ById = useMemo(() => {
     const map = new Map<string, string>()
@@ -222,13 +285,34 @@ export function MenuPage() {
   return (
     <main className="content menu-content">
       {/* Hero Header */}
-      <div className="dashboard-hero menu-hero">
+      <div className="dashboard-hero menu-hero" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <p className="eyebrow">Product Catalog</p>
           <h1>Menu &amp; Dishes</h1>
           <p className="muted">
             Configure categories, prices, and 86 availability. Changes appear instantly on POS terminals.
           </p>
+        </div>
+        <div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={handlePhotoSelected}
+          />
+          <button
+            type="button"
+            className="add-item-submit-btn"
+            disabled={ocrLoading}
+            onClick={() => fileInputRef.current?.click()}
+            title="Photograph a menu / price list and let AI add the items"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}
+          >
+            {ocrLoading ? <span className="btn-spinner" /> : <Icon name="receipt" size={16} />}
+            {ocrLoading ? 'Reading photo…' : 'Import from photo'}
+          </button>
         </div>
       </div>
 
@@ -523,6 +607,85 @@ export function MenuPage() {
           </form>
         </aside>
       </section>
+
+      {/* Import-from-photo review modal */}
+      {ocrDrafts !== null && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => !ocrCommitting && setOcrDrafts(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#fff', color: '#14181c', borderRadius: 14, width: 'min(780px, 100%)', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' }}
+          >
+            <div style={{ padding: '18px 22px', borderBottom: '1px solid #eee' }}>
+              <p className="eyebrow" style={{ margin: 0 }}>AI Menu Import</p>
+              <h2 style={{ margin: '4px 0 2px' }}>Review items ({ocrDrafts.length})</h2>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>Untick anything wrong, fix names/prices, then add to your menu.</p>
+            </div>
+
+            <div style={{ overflowY: 'auto', padding: '4px 22px' }}>
+              {ocrDrafts.map((d, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid #f2f2f2', opacity: ocrSelected[i] ? 1 : 0.45 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!ocrSelected[i]}
+                    onChange={() => setOcrSelected((p) => ({ ...p, [i]: !p[i] }))}
+                    style={{ width: 18, height: 18, flexShrink: 0 }}
+                  />
+                  <input
+                    value={d.name}
+                    onChange={(e) => updateDraft(i, { name: e.target.value })}
+                    placeholder="Item name"
+                    style={{ flex: 2, minWidth: 0, padding: '7px 9px', border: '1px solid #ddd', borderRadius: 8 }}
+                  />
+                  <input
+                    value={d.category}
+                    onChange={(e) => updateDraft(i, { category: e.target.value })}
+                    placeholder="Category"
+                    style={{ flex: 1, minWidth: 0, padding: '7px 9px', border: '1px solid #ddd', borderRadius: 8 }}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <span className="muted">{currencySymbol}</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={d.price}
+                      onChange={(e) => updateDraft(i, { price: Number(e.target.value) })}
+                      style={{ width: 80, padding: '7px 9px', border: '1px solid #ddd', borderRadius: 8 }}
+                    />
+                  </div>
+                  <div style={{ width: 92, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, fontSize: 10, lineHeight: 1.3 }}>
+                    {!d.categoryExists && <span style={{ color: '#2b6cb0' }}>new category</span>}
+                    {d.duplicate && <span style={{ color: '#b7791f' }}>already exists</span>}
+                    <span className="muted" style={{ fontFamily: 'monospace' }}>{d.sku}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ padding: '14px 22px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <span className="muted" style={{ fontSize: 13 }}>{ocrSelectedCount} selected</span>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="button" className="secondary-button" onClick={() => setOcrDrafts(null)} disabled={ocrCommitting}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="add-item-submit-btn"
+                  onClick={handleOcrCommit}
+                  disabled={ocrCommitting || ocrSelectedCount === 0}
+                >
+                  {ocrCommitting ? 'Adding…' : `Add ${ocrSelectedCount} item${ocrSelectedCount === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

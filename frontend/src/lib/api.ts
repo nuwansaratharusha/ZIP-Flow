@@ -91,6 +91,34 @@ async function performRequest(path: string, init: RequestInit, token: string | n
   return fetch(`${API_BASE_URL}${path}`, { ...init, headers })
 }
 
+// File upload: like apiRequest but sends FormData (no forced JSON content-type,
+// so the browser sets the multipart boundary). Same auth + refresh behaviour.
+async function performUpload(path: string, formData: FormData, token: string | null) {
+  const headers = new Headers()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  return fetch(`${API_BASE_URL}${path}`, { method: 'POST', body: formData, headers })
+}
+
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  let response = await performUpload(path, formData, getAccessToken())
+
+  if (response.status === 401) {
+    try {
+      const newAccessToken = await refreshAccessToken()
+      response = await performUpload(path, formData, newAccessToken)
+    } catch {
+      clearSessionTokens()
+      throw new Error('Your session is not valid. Please sign in again.')
+    }
+  }
+
+  const body = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(body?.message ?? `Request failed with status ${response.status}.`)
+  }
+  return body as T
+}
+
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response = await performRequest(path, init, getAccessToken())
 

@@ -1,5 +1,18 @@
-import { apiRequest, type ApiEnvelope } from '../../lib/api'
-import type { Catalog, Category, MenuItem } from './types'
+import { apiRequest, apiUpload, type ApiEnvelope } from '../../lib/api'
+import type { Catalog, Category, MenuItem, OcrDraftItem } from './types'
+
+export function ocrPreview(file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return apiUpload<ApiEnvelope<{ items: OcrDraftItem[] }>>('/api/menu/ocr/preview', fd).then((res) => res.data)
+}
+
+export function ocrCommit(items: { name: string; price: number; category: string; sku: string }[]) {
+  return apiRequest<ApiEnvelope<{ created: number; skipped: number }>>('/api/menu/ocr/commit', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  }).then((res) => res.data)
+}
 
 export function getCategories() {
   return apiRequest<ApiEnvelope<Category[]>>('/api/menu/categories').then((res) => res.data)
