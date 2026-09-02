@@ -43,7 +43,7 @@ services:
       ServerDirectPrint__Token: "${SDP_TOKEN}"
       # Gemini (menu photo OCR import). Leave key blank to disable the feature.
       Gemini__ApiKey: "${GEMINI_API_KEY:-}"
-      Gemini__Model: "${GEMINI_MODEL:-gemini-2.0-flash}"
+      Gemini__Model: "${GEMINI_MODEL:-gemini-3.7-flash}"
     expose:
       - "8080"
     restart: unless-stopped

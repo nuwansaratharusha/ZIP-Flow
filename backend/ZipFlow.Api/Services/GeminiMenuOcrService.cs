@@ -59,6 +59,8 @@ public sealed class GeminiMenuOcrService(
             generationConfig = new
             {
                 responseMimeType = "application/json",
+                // Disable Gemini "thinking" — OCR extraction needs speed + determinism, not reasoning.
+                thinkingConfig = new { thinkingBudget = 0 },
                 responseSchema = new
                 {
                     type = "OBJECT",
