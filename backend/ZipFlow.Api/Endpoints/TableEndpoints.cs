@@ -4,8 +4,8 @@ using ZipFlow.Api.Services;
 
 namespace ZipFlow.Api.Endpoints;
 
-public sealed record CreateTableRequest(string Name, string Section, int Capacity);
-public sealed record UpdateTableRequest(string Name, string Section, int Capacity);
+public sealed record CreateTableRequest(string Name, string Section, int Capacity, Guid FloorId);
+public sealed record UpdateTableRequest(string Name, string Section, int Capacity, Guid FloorId);
 public sealed record SetTableStatusRequest(string Status);
 
 public static class TableEndpoints
@@ -25,11 +25,12 @@ public static class TableEndpoints
             if (request.Capacity < 1)
                 return Results.BadRequest(ApiResponse<object>.Fail("Capacity must be at least 1."));
 
-            var (result, table) = await tables.CreateTableAsync(current.TenantId, request.Name, request.Section, request.Capacity, ct);
+            var (result, table) = await tables.CreateTableAsync(current.TenantId, request.Name, request.Section, request.Capacity, request.FloorId, ct);
             return result switch
             {
                 SaveTableResult.Saved => Results.Ok(ApiResponse<TableDto>.Ok(table!)),
                 SaveTableResult.DuplicateName => Results.Conflict(ApiResponse<object>.Fail("A table with this name already exists.")),
+                SaveTableResult.InvalidFloor => Results.BadRequest(ApiResponse<object>.Fail("Invalid floor.")),
                 _ => Results.BadRequest(ApiResponse<object>.Fail("Unable to create table."))
             };
         })
@@ -42,12 +43,13 @@ public static class TableEndpoints
             if (request.Capacity < 1)
                 return Results.BadRequest(ApiResponse<object>.Fail("Capacity must be at least 1."));
 
-            var (result, table) = await tables.UpdateTableAsync(current.TenantId, id, request.Name, request.Section, request.Capacity, ct);
+            var (result, table) = await tables.UpdateTableAsync(current.TenantId, id, request.Name, request.Section, request.Capacity, request.FloorId, ct);
             return result switch
             {
                 SaveTableResult.Saved => Results.Ok(ApiResponse<TableDto>.Ok(table!)),
                 SaveTableResult.DuplicateName => Results.Conflict(ApiResponse<object>.Fail("A table with this name already exists.")),
                 SaveTableResult.NotFound => Results.NotFound(ApiResponse<object>.Fail("Table not found.")),
+                SaveTableResult.InvalidFloor => Results.BadRequest(ApiResponse<object>.Fail("Invalid floor.")),
                 _ => Results.BadRequest(ApiResponse<object>.Fail("Unable to update table."))
             };
         })
