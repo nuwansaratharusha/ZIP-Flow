@@ -65,7 +65,7 @@ export function TablesPage() {
 
   useEffect(() => {
     Promise.all([refetch(), refetchFloors()])
-      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load tables.'))
+      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load tables or floors.'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -197,6 +197,9 @@ export function TablesPage() {
     try {
       await archiveFloor(floor.id)
       setFloors((prev) => prev.filter((f) => f.id !== floor.id))
+      if (floorId === floor.id) setFloorId('')
+      if (activeFloor === floor.id) setActiveFloor('all')
+      if (editingId && editDraft.floorId === floor.id) setEditingId(null)
       toast.info(`Floor "${floor.name}" archived.`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to archive floor.')
@@ -493,12 +496,12 @@ export function TablesPage() {
 
           {floors.length > 0 && (
             <div className="menu-table tables-table">
-              <div className="menu-row menu-row-head tables-row">
+              <div className="menu-row menu-row-head floors-row">
                 <span>Floor Name</span>
                 <span className="actions-header">Actions</span>
               </div>
               {floors.map((floor) => (
-                <div className="menu-row tables-row" key={floor.id}>
+                <div className="menu-row floors-row" key={floor.id}>
                   {editingFloorId === floor.id ? (
                     <>
                       <input
@@ -607,6 +610,7 @@ export function TablesPage() {
             <div className="menu-table tables-table">
               <div className="menu-row menu-row-head tables-row">
                 <span>Table Name</span>
+                <span>Floor</span>
                 <span>Section</span>
                 <span>Capacity</span>
                 <span>Status</span>
@@ -667,6 +671,7 @@ export function TablesPage() {
                       <span className="menu-item-name">
                         <strong>{table.name}</strong>
                       </span>
+                      <span className="muted">{table.floorName}</span>
                       <span className="muted">{table.section}</span>
                       <span className="muted">{table.capacity} seats</span>
                       <span>

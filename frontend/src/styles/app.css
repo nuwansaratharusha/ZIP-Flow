@@ -1641,7 +1641,8 @@ svg { flex: 0 0 auto; }
 
 /* Inventory */
 .inventory-table .inventory-row { grid-template-columns: minmax(0, 1.4fr) 110px 60px 80px 60px 60px 80px 140px; }
-.tables-table .tables-row { grid-template-columns: minmax(0, 1.4fr) 140px 100px 140px 130px; }
+.tables-table .tables-row { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) 100px 100px 140px 130px; }
+.tables-table .floors-row { grid-template-columns: minmax(0, 1fr) auto; }
 .tables-add-fields { grid-template-columns: minmax(0, 1.4fr) 160px 100px auto; }
 .table-status-select { border: 1px solid #dce0e6; border-radius: 8px; padding: 5px 8px; font-size: 10px; font-weight: 650; background: white; color: var(--ink); }
 .inventory-edit-input { padding: 4px 6px; font-size: 10px; }
