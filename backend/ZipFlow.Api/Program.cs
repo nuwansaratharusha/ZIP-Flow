@@ -113,6 +113,7 @@ app.MapFoundationEndpoints();
 app.MapMenuEndpoints();
 app.MapOrderEndpoints();
 app.MapTableEndpoints();
+app.MapFloorEndpoints();
 app.MapSettingsEndpoints();
 app.MapPrintEndpoints(builder.Configuration["ServerDirectPrint:Token"] ?? string.Empty);
 app.MapMenuOcrEndpoints();
