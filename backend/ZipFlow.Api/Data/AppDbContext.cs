@@ -20,6 +20,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
     public DbSet<OrderRound> OrderRounds => Set<OrderRound>();
     public DbSet<RestaurantTable> RestaurantTables => Set<RestaurantTable>();
+    public DbSet<Floor> Floors => Set<Floor>();
     public DbSet<OrderNumberCounter> OrderNumberCounters => Set<OrderNumberCounter>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -202,6 +203,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasOne(x => x.MenuItem).WithMany().HasForeignKey(x => x.MenuItemId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<Floor>(b =>
+        {
+            b.ToTable("Floor", "pos");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Name).HasMaxLength(60).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique().HasFilter("\"IsArchived\" = false");
+            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<RestaurantTable>(b =>
         {
             b.ToTable("RestaurantTable", "pos");
@@ -211,6 +221,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(x => x.Status).HasMaxLength(20).IsRequired();
             b.HasIndex(x => new { x.TenantId, x.Name }).IsUnique().HasFilter("\"IsArchived\" = false");
             b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.Floor).WithMany().HasForeignKey(x => x.FloorId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

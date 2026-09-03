@@ -212,4 +212,14 @@ public sealed class RestaurantTable : EntityBase
     public int Capacity { get; set; }
     public string Status { get; set; } = "available";
     public bool IsArchived { get; set; }
+    public Guid FloorId { get; set; }
+    public Floor Floor { get; set; } = null!;
+}
+
+public sealed class Floor : EntityBase
+{
+    public Guid TenantId { get; set; }
+    public Tenant Tenant { get; set; } = null!;
+    public string Name { get; set; } = string.Empty;
+    public bool IsArchived { get; set; }
 }
