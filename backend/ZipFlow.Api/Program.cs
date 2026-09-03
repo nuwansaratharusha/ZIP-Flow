@@ -28,6 +28,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ITableService, TableService>();
+builder.Services.AddScoped<IFloorService, FloorService>();
 builder.Services.AddScoped<ISettingsService, SettingsService>();
 builder.Services.AddScoped<IEscPosPrintService, EscPosPrintService>();
 builder.Services.AddSingleton<IServerDirectPrintQueue, ServerDirectPrintQueue>();
