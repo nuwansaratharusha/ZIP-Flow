@@ -7,6 +7,8 @@ import { isWaiterOnly } from '../auth/roles'
 import { openOrder } from '../orders/api'
 import { archiveTable, createTable, getTables, updateTable } from './api'
 import { TABLE_SECTIONS, type RestaurantTable } from './types'
+import { getFloors } from '../floors/api'
+import type { Floor } from '../floors/types'
 import '../../styles/tables.css'
 
 type EditDraft = { name: string; section: string; capacity: string }
@@ -20,11 +22,13 @@ export function TablesPage() {
   const canManageTables = !isWaiterOnly(session?.roles)
 
   const [tables, setTables] = useState<RestaurantTable[]>([])
+  const [floors, setFloors] = useState<Floor[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
   const [manageOpen, setManageOpen] = useState(false)
   const [activeSection, setActiveSection] = useState<string>('all')
+  const [activeFloor, setActiveFloor] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
   // Owner setup state (behind the Manage toggle)
@@ -48,9 +52,10 @@ export function TablesPage() {
   const pendingOrderIdRef = useRef<string | null>(null)
 
   const refetch = () => getTables().then(setTables)
+  const refetchFloors = () => getFloors().then(setFloors)
 
   useEffect(() => {
-    refetch()
+    Promise.all([refetch(), refetchFloors()])
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load tables.'))
       .finally(() => setLoading(false))
   }, [])
@@ -66,6 +71,7 @@ export function TablesPage() {
     const query = searchQuery.trim().toLowerCase()
     return activeTables.filter((t) => {
       if (activeSection !== 'all' && t.section !== activeSection) return false
+      if (activeFloor !== 'all' && t.floorId !== activeFloor) return false
       if (query) {
         const matchesName = t.name.toLowerCase().includes(query)
         const matchesCustomer = t.openOrderCustomerName?.toLowerCase().includes(query)
@@ -74,7 +80,7 @@ export function TablesPage() {
       }
       return true
     })
-  }, [activeTables, activeSection, searchQuery])
+  }, [activeTables, activeSection, activeFloor, searchQuery])
 
   const occupiedCount = useMemo(() => activeTables.filter((t) => t.status === 'occupied').length, [activeTables])
   const availableCount = useMemo(() => activeTables.filter((t) => t.status === 'available').length, [activeTables])
@@ -243,6 +249,26 @@ export function TablesPage() {
             <div className="section-filter-pills">
               <button
                 type="button"
+                className={`filter-pill ${activeFloor === 'all' ? 'active' : ''}`}
+                onClick={() => setActiveFloor('all')}
+              >
+                All Floors <span className="pill-count">{activeTables.length}</span>
+              </button>
+              {floors.map((floor) => {
+                const count = activeTables.filter((t) => t.floorId === floor.id).length
+                return (
+                  <button
+                    key={floor.id}
+                    type="button"
+                    className={`filter-pill ${activeFloor === floor.id ? 'active' : ''}`}
+                    onClick={() => setActiveFloor(floor.id)}
+                  >
+                    {floor.name} <span className="pill-count">{count}</span>
+                  </button>
+                )
+              })}
+              <button
+                type="button"
                 className={`filter-pill ${activeSection === 'all' ? 'active' : ''}`}
                 onClick={() => setActiveSection('all')}
               >
@@ -316,7 +342,7 @@ export function TablesPage() {
                       <div className="table-card-top">
                         <div className="table-name-group">
                           <strong className="table-card-title">{table.name}</strong>
-                          <span className="table-section-tag">{table.section}</span>
+                          <span className="table-section-tag">{table.floorName} · {table.section}</span>
                         </div>
                         <span className={`table-status-badge ${table.status}`}>
                           <span className="status-indicator-dot" />
