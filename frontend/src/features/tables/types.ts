@@ -9,6 +9,8 @@ export type RestaurantTable = {
   capacity: number
   status: TableStatus
   isArchived: boolean
+  floorId: string
+  floorName: string
   openOrderId: string | null
   openOrderCustomerName: string | null
 }

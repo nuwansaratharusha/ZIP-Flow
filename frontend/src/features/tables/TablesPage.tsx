@@ -7,9 +7,11 @@ import { isWaiterOnly } from '../auth/roles'
 import { openOrder } from '../orders/api'
 import { archiveTable, createTable, getTables, updateTable } from './api'
 import { TABLE_SECTIONS, type RestaurantTable } from './types'
+import { archiveFloor, createFloor, getFloors, updateFloor } from '../floors/api'
+import type { Floor } from '../floors/types'
 import '../../styles/tables.css'
 
-type EditDraft = { name: string; section: string; capacity: string }
+type EditDraft = { name: string; section: string; capacity: string; floorId: string }
 
 export function TablesPage() {
   const navigate = useNavigate()
@@ -20,23 +22,34 @@ export function TablesPage() {
   const canManageTables = !isWaiterOnly(session?.roles)
 
   const [tables, setTables] = useState<RestaurantTable[]>([])
+  const [floors, setFloors] = useState<Floor[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
   const [manageOpen, setManageOpen] = useState(false)
   const [activeSection, setActiveSection] = useState<string>('all')
+  const [activeFloor, setActiveFloor] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
   // Owner setup state (behind the Manage toggle)
   const [name, setName] = useState('')
   const [section, setSection] = useState<string>(TABLE_SECTIONS[0])
   const [capacity, setCapacity] = useState('4')
+  const [floorId, setFloorId] = useState<string>('')
   const [addError, setAddError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<EditDraft>({ name: '', section: TABLE_SECTIONS[0], capacity: '4' })
+  const [editDraft, setEditDraft] = useState<EditDraft>({ name: '', section: TABLE_SECTIONS[0], capacity: '4', floorId: '' })
   const [editError, setEditError] = useState('')
+
+  // Floor management state
+  const [newFloorName, setNewFloorName] = useState('')
+  const [floorAddError, setFloorAddError] = useState('')
+  const [floorSaving, setFloorSaving] = useState(false)
+  const [editingFloorId, setEditingFloorId] = useState<string | null>(null)
+  const [editFloorName, setEditFloorName] = useState('')
+  const [floorEditError, setFloorEditError] = useState('')
 
   // Open-table dialog state
   const [openTarget, setOpenTarget] = useState<RestaurantTable | null>(null)
@@ -48,12 +61,17 @@ export function TablesPage() {
   const pendingOrderIdRef = useRef<string | null>(null)
 
   const refetch = () => getTables().then(setTables)
+  const refetchFloors = () => getFloors().then(setFloors)
 
   useEffect(() => {
-    refetch()
-      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load tables.'))
+    Promise.all([refetch(), refetchFloors()])
+      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load tables or floors.'))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (!floorId && floors.length > 0) setFloorId(floors[0].id)
+  }, [floors, floorId])
 
   const activeTables = useMemo(() => tables.filter((t) => !t.isArchived), [tables])
 
@@ -66,6 +84,7 @@ export function TablesPage() {
     const query = searchQuery.trim().toLowerCase()
     return activeTables.filter((t) => {
       if (activeSection !== 'all' && t.section !== activeSection) return false
+      if (activeFloor !== 'all' && t.floorId !== activeFloor) return false
       if (query) {
         const matchesName = t.name.toLowerCase().includes(query)
         const matchesCustomer = t.openOrderCustomerName?.toLowerCase().includes(query)
@@ -74,7 +93,7 @@ export function TablesPage() {
       }
       return true
     })
-  }, [activeTables, activeSection, searchQuery])
+  }, [activeTables, activeSection, activeFloor, searchQuery])
 
   const occupiedCount = useMemo(() => activeTables.filter((t) => t.status === 'occupied').length, [activeTables])
   const availableCount = useMemo(() => activeTables.filter((t) => t.status === 'available').length, [activeTables])
@@ -86,10 +105,11 @@ export function TablesPage() {
     const cap = Number(capacity)
     if (!name.trim()) return setAddError('Table name is required.')
     if (!Number.isFinite(cap) || cap < 1) return setAddError('Capacity must be at least 1.')
+    if (!floorId) return setAddError('Floor is required.')
 
     setSaving(true)
     try {
-      const created = await createTable(name.trim(), section, cap)
+      const created = await createTable(name.trim(), section, cap, floorId)
       setTables((prev) => [...prev, created])
       setName('')
       setCapacity('4')
@@ -104,7 +124,7 @@ export function TablesPage() {
   const startEdit = (table: RestaurantTable) => {
     setEditingId(table.id)
     setEditError('')
-    setEditDraft({ name: table.name, section: table.section, capacity: String(table.capacity) })
+    setEditDraft({ name: table.name, section: table.section, capacity: String(table.capacity), floorId: table.floorId })
   }
 
   const saveEdit = async (table: RestaurantTable) => {
@@ -114,7 +134,7 @@ export function TablesPage() {
     if (!Number.isFinite(cap) || cap < 1) return setEditError('Capacity must be at least 1.')
 
     try {
-      const updated = await updateTable(table.id, editDraft.name.trim(), editDraft.section, cap)
+      const updated = await updateTable(table.id, editDraft.name.trim(), editDraft.section, cap, editDraft.floorId)
       setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       setEditingId(null)
       toast.success(`Table "${updated.name}" updated.`)
@@ -131,6 +151,58 @@ export function TablesPage() {
       toast.info(`Table "${table.name}" archived.`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to archive table.')
+    }
+  }
+
+  const submitAddFloor = async (event: FormEvent) => {
+    event.preventDefault()
+    setFloorAddError('')
+    if (!newFloorName.trim()) return setFloorAddError('Floor name is required.')
+
+    setFloorSaving(true)
+    try {
+      const created = await createFloor(newFloorName.trim())
+      setFloors((prev) => [...prev, created])
+      setNewFloorName('')
+      toast.success(`Floor "${created.name}" created successfully.`)
+    } catch (err) {
+      setFloorAddError(err instanceof Error ? err.message : 'Failed to add floor.')
+    } finally {
+      setFloorSaving(false)
+    }
+  }
+
+  const startEditFloor = (floor: Floor) => {
+    setEditingFloorId(floor.id)
+    setFloorEditError('')
+    setEditFloorName(floor.name)
+  }
+
+  const saveEditFloor = async (floor: Floor) => {
+    setFloorEditError('')
+    if (!editFloorName.trim()) return setFloorEditError('Floor name is required.')
+
+    try {
+      const updated = await updateFloor(floor.id, editFloorName.trim())
+      setFloors((prev) => prev.map((f) => (f.id === updated.id ? updated : f)))
+      setEditingFloorId(null)
+      toast.success(`Floor "${updated.name}" updated.`)
+    } catch (err) {
+      setFloorEditError(err instanceof Error ? err.message : 'Failed to update floor.')
+    }
+  }
+
+  const removeFloor = async (floor: Floor) => {
+    if (!window.confirm(`Archive floor "${floor.name}"?`)) return
+    try {
+      await archiveFloor(floor.id)
+      setFloors((prev) => prev.filter((f) => f.id !== floor.id))
+      if (floorId === floor.id) setFloorId('')
+      if (activeFloor === floor.id) setActiveFloor('all')
+      if (editingId && editDraft.floorId === floor.id) setEditingId(null)
+      toast.info(`Floor "${floor.name}" archived.`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to archive floor.')
     }
   }
 
@@ -243,6 +315,26 @@ export function TablesPage() {
             <div className="section-filter-pills">
               <button
                 type="button"
+                className={`filter-pill ${activeFloor === 'all' ? 'active' : ''}`}
+                onClick={() => setActiveFloor('all')}
+              >
+                All Floors <span className="pill-count">{activeTables.length}</span>
+              </button>
+              {floors.map((floor) => {
+                const count = activeTables.filter((t) => t.floorId === floor.id).length
+                return (
+                  <button
+                    key={floor.id}
+                    type="button"
+                    className={`filter-pill ${activeFloor === floor.id ? 'active' : ''}`}
+                    onClick={() => setActiveFloor(floor.id)}
+                  >
+                    {floor.name} <span className="pill-count">{count}</span>
+                  </button>
+                )
+              })}
+              <button
+                type="button"
                 className={`filter-pill ${activeSection === 'all' ? 'active' : ''}`}
                 onClick={() => setActiveSection('all')}
               >
@@ -316,7 +408,7 @@ export function TablesPage() {
                       <div className="table-card-top">
                         <div className="table-name-group">
                           <strong className="table-card-title">{table.name}</strong>
-                          <span className="table-section-tag">{table.section}</span>
+                          <span className="table-section-tag">{table.floorName} · {table.section}</span>
                         </div>
                         <span className={`table-status-badge ${table.status}`}>
                           <span className="status-indicator-dot" />
@@ -375,6 +467,83 @@ export function TablesPage() {
             <span className="quiet-pill">{tables.length} Total Tables</span>
           </div>
 
+          {/* Floors Card */}
+          <form className="manage-add-table-card" onSubmit={submitAddFloor}>
+            <div className="form-card-header">
+              <Icon name="plus" size={18} />
+              <strong>Add New Floor</strong>
+            </div>
+            <div className="tables-add-fields">
+              <div className="input-with-label">
+                <label>Floor Name</label>
+                <input
+                  placeholder="e.g. Ground Floor, Rooftop"
+                  value={newFloorName}
+                  onChange={(e) => setNewFloorName(e.target.value)}
+                  required
+                />
+              </div>
+              <button className="primary-button add-table-submit-btn" type="submit" disabled={floorSaving}>
+                {floorSaving ? 'Adding…' : 'Add Floor'}
+              </button>
+            </div>
+            {floorAddError && (
+              <div className="alert error">
+                <Icon name="alertTriangle" size={14} /> {floorAddError}
+              </div>
+            )}
+          </form>
+
+          {floors.length > 0 && (
+            <div className="menu-table tables-table">
+              <div className="menu-row menu-row-head floors-row">
+                <span>Floor Name</span>
+                <span className="actions-header">Actions</span>
+              </div>
+              {floors.map((floor) => (
+                <div className="menu-row floors-row" key={floor.id}>
+                  {editingFloorId === floor.id ? (
+                    <>
+                      <input
+                        className="inventory-edit-input"
+                        value={editFloorName}
+                        onChange={(e) => setEditFloorName(e.target.value)}
+                        autoFocus
+                      />
+                      <span className="inventory-row-actions">
+                        <button className="menu-price-edit save-btn" onClick={() => saveEditFloor(floor)}>
+                          <Icon name="check" size={14} /> Save
+                        </button>
+                        <button className="menu-archive cancel-btn" onClick={() => setEditingFloorId(null)}>
+                          Cancel
+                        </button>
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="menu-item-name">
+                        <strong>{floor.name}</strong>
+                      </span>
+                      <span className="inventory-row-actions">
+                        <button className="menu-price-edit" onClick={() => startEditFloor(floor)} title="Edit Floor">
+                          <Icon name="edit" size={14} /> Edit
+                        </button>
+                        <button className="menu-archive" onClick={() => removeFloor(floor)} title="Archive Floor">
+                          <Icon name="trash" size={14} /> Archive
+                        </button>
+                      </span>
+                    </>
+                  )}
+                </div>
+              ))}
+              {editingFloorId && floorEditError && (
+                <div className="alert error inventory-edit-error">
+                  <Icon name="alertTriangle" size={14} /> {floorEditError}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Add Table Form Card */}
           <form className="manage-add-table-card" onSubmit={submitAdd}>
             <div className="form-card-header">
@@ -390,6 +559,16 @@ export function TablesPage() {
                   onChange={(e) => setName(e.target.value)}
                   required
                 />
+              </div>
+              <div className="input-with-label">
+                <label>Floor</label>
+                <select value={floorId} onChange={(e) => setFloorId(e.target.value)}>
+                  {floors.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="input-with-label">
                 <label>Section</label>
@@ -431,6 +610,7 @@ export function TablesPage() {
             <div className="menu-table tables-table">
               <div className="menu-row menu-row-head tables-row">
                 <span>Table Name</span>
+                <span>Floor</span>
                 <span>Section</span>
                 <span>Capacity</span>
                 <span>Status</span>
@@ -446,6 +626,17 @@ export function TablesPage() {
                         onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
                         autoFocus
                       />
+                      <select
+                        className="inventory-edit-input"
+                        value={editDraft.floorId}
+                        onChange={(e) => setEditDraft({ ...editDraft, floorId: e.target.value })}
+                      >
+                        {floors.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
                       <select
                         className="inventory-edit-input"
                         value={editDraft.section}
@@ -480,6 +671,7 @@ export function TablesPage() {
                       <span className="menu-item-name">
                         <strong>{table.name}</strong>
                       </span>
+                      <span className="muted">{table.floorName}</span>
                       <span className="muted">{table.section}</span>
                       <span className="muted">{table.capacity} seats</span>
                       <span>

@@ -409,6 +409,7 @@
 .tables-add-fields input,
 .tables-add-fields select {
   background: #ffffff;
+  color: #0f172a;
   border: 1px solid #cbd5e1;
   border-radius: 9px;
   padding: 9px 12px;

@@ -4,13 +4,14 @@ using ZipFlow.Api.Domain;
 
 namespace ZipFlow.Api.Services;
 
-public sealed record TableDto(Guid Id, string Name, string Section, int Capacity, string Status, bool IsArchived, Guid? OpenOrderId, string? OpenOrderCustomerName);
+public sealed record TableDto(Guid Id, string Name, string Section, int Capacity, string Status, bool IsArchived, Guid FloorId, string FloorName, Guid? OpenOrderId, string? OpenOrderCustomerName);
 
 public enum SaveTableResult
 {
     Saved,
     DuplicateName,
-    NotFound
+    NotFound,
+    InvalidFloor
 }
 
 public enum SetTableStatusResult
@@ -25,10 +26,10 @@ public interface ITableService
     Task<IReadOnlyList<TableDto>> GetTablesAsync(Guid tenantId, CancellationToken ct);
 
     Task<(SaveTableResult Result, TableDto? Table)> CreateTableAsync(
-        Guid tenantId, string name, string section, int capacity, CancellationToken ct);
+        Guid tenantId, string name, string section, int capacity, Guid floorId, CancellationToken ct);
 
     Task<(SaveTableResult Result, TableDto? Table)> UpdateTableAsync(
-        Guid tenantId, Guid tableId, string name, string section, int capacity, CancellationToken ct);
+        Guid tenantId, Guid tableId, string name, string section, int capacity, Guid floorId, CancellationToken ct);
 
     Task<(SetTableStatusResult Result, TableDto? Table)> SetStatusAsync(
         Guid tenantId, Guid tableId, string status, CancellationToken ct);
@@ -55,14 +56,20 @@ public sealed class TableService(AppDbContext db) : ITableService
                 x.Capacity,
                 x.Status,
                 x.IsArchived,
+                x.FloorId,
+                x.Floor.Name,
                 db.Orders.Where(o => o.TableId == x.Id && o.TenantId == tenantId && o.Status == "Open").Select(o => (Guid?)o.Id).FirstOrDefault(),
                 db.Orders.Where(o => o.TableId == x.Id && o.TenantId == tenantId && o.Status == "Open").Select(o => o.CustomerName).FirstOrDefault()))
             .ToListAsync(ct);
     }
 
     public async Task<(SaveTableResult Result, TableDto? Table)> CreateTableAsync(
-        Guid tenantId, string name, string section, int capacity, CancellationToken ct)
+        Guid tenantId, string name, string section, int capacity, Guid floorId, CancellationToken ct)
     {
+        var floorValid = await db.Floors.AnyAsync(x => x.Id == floorId && x.TenantId == tenantId && !x.IsArchived, ct);
+        if (!floorValid)
+            return (SaveTableResult.InvalidFloor, null);
+
         var normalizedName = name.Trim();
         var duplicate = await db.RestaurantTables.AnyAsync(
             x => x.TenantId == tenantId && x.Name.ToLower() == normalizedName.ToLower(), ct);
@@ -75,21 +82,26 @@ public sealed class TableService(AppDbContext db) : ITableService
             Name = normalizedName,
             Section = section.Trim(),
             Capacity = capacity,
-            Status = "available"
+            Status = "available",
+            FloorId = floorId
         };
 
         db.RestaurantTables.Add(table);
         await db.SaveChangesAsync(ct);
 
-        return (SaveTableResult.Saved, ToDto(table));
+        return (SaveTableResult.Saved, await ToDtoAsync(table, ct));
     }
 
     public async Task<(SaveTableResult Result, TableDto? Table)> UpdateTableAsync(
-        Guid tenantId, Guid tableId, string name, string section, int capacity, CancellationToken ct)
+        Guid tenantId, Guid tableId, string name, string section, int capacity, Guid floorId, CancellationToken ct)
     {
         var table = await db.RestaurantTables.SingleOrDefaultAsync(x => x.Id == tableId && x.TenantId == tenantId, ct);
         if (table is null)
             return (SaveTableResult.NotFound, null);
+
+        var floorValid = await db.Floors.AnyAsync(x => x.Id == floorId && x.TenantId == tenantId && !x.IsArchived, ct);
+        if (!floorValid)
+            return (SaveTableResult.InvalidFloor, null);
 
         var normalizedName = name.Trim();
         if (!normalizedName.Equals(table.Name, StringComparison.OrdinalIgnoreCase))
@@ -103,10 +115,11 @@ public sealed class TableService(AppDbContext db) : ITableService
         table.Name = normalizedName;
         table.Section = section.Trim();
         table.Capacity = capacity;
+        table.FloorId = floorId;
         table.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
-        return (SaveTableResult.Saved, ToDto(table));
+        return (SaveTableResult.Saved, await ToDtoAsync(table, ct));
     }
 
     public async Task<(SetTableStatusResult Result, TableDto? Table)> SetStatusAsync(
@@ -123,7 +136,7 @@ public sealed class TableService(AppDbContext db) : ITableService
         table.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
-        return (SetTableStatusResult.Updated, ToDto(table));
+        return (SetTableStatusResult.Updated, await ToDtoAsync(table, ct));
     }
 
     public async Task<bool> ArchiveTableAsync(Guid tenantId, Guid tableId, CancellationToken ct)
@@ -138,6 +151,11 @@ public sealed class TableService(AppDbContext db) : ITableService
         return true;
     }
 
-    private static TableDto ToDto(RestaurantTable table) =>
-        new(table.Id, table.Name, table.Section, table.Capacity, table.Status, table.IsArchived, null, null);
+    private async Task<TableDto> ToDtoAsync(RestaurantTable table, CancellationToken ct)
+    {
+        var floorName = await db.Floors.Where(x => x.Id == table.FloorId).Select(x => x.Name).SingleAsync(ct);
+        return new TableDto(
+            table.Id, table.Name, table.Section, table.Capacity, table.Status, table.IsArchived,
+            table.FloorId, floorName, null, null);
+    }
 }

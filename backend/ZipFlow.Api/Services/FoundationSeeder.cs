@@ -85,6 +85,18 @@ public sealed class FoundationSeeder(
             db.Locations.Add(location);
         }
 
+        var floor = await db.Floors.SingleOrDefaultAsync(
+            x => x.TenantId == tenant.Id && x.Name == "Main Floor" && !x.IsArchived, ct);
+        if (floor is null)
+        {
+            floor = new Floor
+            {
+                TenantId = tenant.Id,
+                Name = "Main Floor"
+            };
+            db.Floors.Add(floor);
+        }
+
         foreach (var item in FoundationPermissions)
         {
             if (!await db.Permissions.AnyAsync(x => x.Code == item.Code, ct))
