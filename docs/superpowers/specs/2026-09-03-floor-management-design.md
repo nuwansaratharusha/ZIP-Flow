@@ -26,10 +26,14 @@ public sealed class Floor : EntityBase
     public Guid TenantId { get; set; }
     public Tenant Tenant { get; set; } = null!;
     public string Name { get; set; } = string.Empty;
-    public int SortOrder { get; set; }
     public bool IsArchived { get; set; }
 }
 ```
+
+No `SortOrder` — floors list alphabetically by `Name`, same as
+`TableService.GetTablesAsync` orders by `Section` then `Name` today.
+(Dropped from the original draft: nothing in this spec ever wrote a
+non-default value to it.)
 
 `RestaurantTable` gains a required FK:
 
@@ -58,30 +62,59 @@ modelBuilder.Entity<RestaurantTable>(b =>
 });
 ```
 
+Also register the new `DbSet` (`AppDbContext.cs:22`, alongside
+`RestaurantTables`):
+
+```csharp
+public DbSet<Floor> Floors => Set<Floor>();
+```
+
 ### Migration
 
-One EF Core migration:
-1. Create `pos.Floor` table.
-2. Data migration: for each existing `TenantId` present in
-   `RestaurantTable`, insert one `Floor` row named `"Main Floor"`
-   (`SortOrder = 0`).
-3. Backfill `RestaurantTable.FloorId` to that tenant's new `Floor.Id`.
-4. Add the `FloorId` column as NOT NULL + FK (after backfill, so the
-   NOT NULL constraint doesn't fail on existing rows).
+One EF Core migration, in this order (a required FK on an already
+populated table must be added nullable, backfilled, then constrained
+— adding it NOT NULL up front fails against existing rows):
 
-This is the same backfill-then-constrain pattern needed any time a
-required FK is added to a populated table — no new pattern for this
-codebase.
+1. `CreateTable` for `pos.Floor` (schema above).
+2. `AddColumn<Guid>` for `RestaurantTable.FloorId`, **nullable**, no FK
+   yet.
+3. Data migration (raw SQL in the migration's `Up`, since it needs to
+   run per tenant): for every row in `pos.Tenant`, insert one `Floor`
+   row named `"Main Floor"`:
+   ```sql
+   INSERT INTO pos."Floor" ("Id", "TenantId", "Name", "IsArchived", "CreatedAt", "UpdatedAt")
+   SELECT gen_random_uuid(), t."Id", 'Main Floor', false, now(), now()
+   FROM pos."Tenant" t;
+   ```
+   (`EntityBase` requires `CreatedAt`/`UpdatedAt` — confirm exact
+   column names against `Entities.cs` before writing the migration.)
+   Seeding is by `pos.Tenant`, not by distinct `TenantId` values
+   already present in `RestaurantTable` — a tenant with zero tables
+   today must still get a floor, or table creation is blocked from
+   day one for that tenant. `FoundationSeeder.cs` (which seeds new
+   tenants) also needs a "Main Floor" insert so newly created tenants
+   aren't missed.
+4. Backfill: `UPDATE pos."RestaurantTable" t SET "FloorId" = f."Id" FROM pos."Floor" f WHERE f."TenantId" = t."TenantId" AND f."Name" = 'Main Floor'`.
+5. `AlterColumn` to make `FloorId` NOT NULL, then `AddForeignKey` to
+   `pos.Floor`.
+
+### DI and routing
+
+- `Program.cs:30` (next to `AddScoped<ITableService, TableService>()`):
+  add `builder.Services.AddScoped<IFloorService, FloorService>();`
+- `Program.cs:114` (next to `app.MapTableEndpoints()`): add
+  `app.MapFloorEndpoints();`
 
 ## Backend
 
 ### `IFloorService` / `FloorService`
 
 Mirrors `ITableService`/`TableService`
-(`backend/ZipFlow.Api/Services/TableService.cs`) exactly:
+(`backend/ZipFlow.Api/Services/TableService.cs`), with one deliberate
+difference called out below (duplicate-name scope):
 
 ```csharp
-public sealed record FloorDto(Guid Id, string Name, int SortOrder, bool IsArchived);
+public sealed record FloorDto(Guid Id, string Name);
 
 public enum SaveFloorResult { Saved, DuplicateName, NotFound }
 public enum ArchiveFloorResult { Archived, NotFound, InUse }
@@ -95,15 +128,28 @@ public interface IFloorService
 }
 ```
 
-- `CreateFloorAsync` / `UpdateFloorAsync`: same duplicate-name check
-  pattern as `TableService` (case-insensitive, scoped to
-  non-archived floors within the tenant).
-- `ArchiveFloorAsync`: returns `InUse` (no-op, no write) if any
-  non-archived `RestaurantTable` still references the floor. Caller
-  maps `InUse` to HTTP 409.
-- `GetFloorsAsync`: ordered by `SortOrder` then `Name`, excludes
-  archived floors (matches `TableService.GetTablesAsync`'s
-  `!x.IsArchived` filter).
+`FloorDto` drops `IsArchived`: `GetFloorsAsync` only ever returns
+non-archived floors (see below), so the field would always be `false`
+on the wire. There is no "view archived floors" list in this spec —
+archive is one-way, matching the existing table-archive UX (archived
+tables also aren't listed anywhere in the UI today).
+
+- `CreateFloorAsync` / `UpdateFloorAsync`: duplicate-name check scoped
+  to **non-archived** floors only (case-insensitive), matching the DB
+  unique index's `WHERE "IsArchived" = false` filter. Note this is
+  *not* identical to `TableService.CreateTableAsync`'s check
+  (`TableService.cs:67-68`), which does not exclude archived rows —
+  that is an existing inconsistency in `TableService`, not something
+  to replicate here.
+- Both also catch `DbUpdateException` from the `SaveChangesAsync`
+  call and translate a unique-violation into `DuplicateName` rather
+  than letting it surface as a 500 — the check-then-insert is not
+  atomic, so two concurrent creates with the same name can both pass
+  the pre-check.
+- `ArchiveFloorAsync`: returns `InUse` (no write) if any non-archived
+  `RestaurantTable` still references the floor. Caller maps `InUse`
+  to HTTP 409. No unarchive endpoint — out of scope.
+- `GetFloorsAsync`: `Where(x => !x.IsArchived).OrderBy(x => x.Name)`.
 
 ### `FloorEndpoints`
 
@@ -132,7 +178,7 @@ management is part of the same "layout" concern.
 
 ### `frontend/src/features/floors/`
 
-- `types.ts`: `Floor = { id: string; name: string; sortOrder: number }`
+- `types.ts`: `Floor = { id: string; name: string }`
 - `api.ts`: `getFloors`, `createFloor`, `updateFloor`, `archiveFloor`
   — same shape as `frontend/src/features/tables/api.ts`.
 
@@ -142,8 +188,9 @@ management is part of the same "layout" concern.
 - New `activeFloor` filter state, same pattern as `activeSection`: a
   pill row above (or beside) the existing section pills, "All
   Floors" + one pill per floor with a count.
-- `RestaurantTable` type gains `floorId: string; floorName: string`;
-  table cards show the floor name (e.g. next to the section tag).
+- `RestaurantTable` type (`frontend/src/features/tables/types.ts`)
+  gains `floorId: string; floorName: string`; table cards show the
+  floor name (e.g. next to the section tag).
 - "Manage Layout" panel: new "Floors" card, placed above the existing
   table list, same visual pattern as the table list (add-form + rows
   with inline rename + archive button). Archive button shows the
@@ -152,6 +199,14 @@ management is part of the same "layout" concern.
 - Add Table form and the inline Edit Table row both get a Floor
   `<select>` next to the existing Section `<select>`, populated from
   the fetched floor list.
+
+### `DashboardPage.tsx`
+
+Also consumes the tables API
+(`frontend/src/features/dashboard/DashboardPage.tsx`). Since
+`RestaurantTable` gains required `floorId`/`floorName` fields, check
+this file compiles against the updated type — it is not expected to
+need behavior changes, just type-checked.
 
 ## Error Handling
 
@@ -168,16 +223,23 @@ All mirror the existing `TableEndpoints` error-handling conventions
 
 ## Testing
 
-- Backend: unit tests for `FloorService` — create, duplicate name,
-  rename, archive success, archive blocked while in use.
-- Backend: integration test asserting the migration backfill creates
-  exactly one `"Main Floor"` per existing tenant and assigns all
-  existing tables to it.
-- Backend: `TableService` tests for the new `InvalidFloor` path.
-- Frontend: manual pass — add a floor, assign a table to it, filter
-  the floor-plan view by floor, attempt to archive a floor with an
-  occupied table on it (expect blocked), archive an empty floor
-  (expect success).
+There is no test project in this repo today (`backend/` contains only
+`ZipFlow.Api.csproj`, no test `.csproj` or `.sln` reference to one).
+Adding one is out of scope for this feature — automated backend tests
+are not part of this plan. Verification is manual, against a local
+run of the API and frontend:
+
+- Add a floor, rename it, confirm duplicate-name create/rename is
+  rejected with 409.
+- Assign a table to a floor via the Add Table form; confirm it shows
+  up filtered correctly on the floor-plan view.
+- Attempt to archive a floor with a table still on it — confirm 409
+  and the table is unaffected.
+- Archive an empty floor — confirm it disappears from the floor list
+  and filter pills.
+- Run the migration against a database that already has tenants and
+  tables (e.g. local dev data) and confirm every existing table ends
+  up on a `"Main Floor"` with no NULL `FloorId` left behind.
 
 ## Out of Scope
 
@@ -186,3 +248,8 @@ All mirror the existing `TableEndpoints` error-handling conventions
   and one Section, independently.
 - No drag-and-drop visual floor-plan editor — this is list/form-based
   management, matching the existing Tables page style.
+- No floor reordering/custom sort — floors list alphabetically.
+- No "view archived floors" / unarchive — archiving a floor is
+  one-way, matching the existing table-archive behavior.
+- No new automated backend test project — manual verification only
+  (see Testing).
