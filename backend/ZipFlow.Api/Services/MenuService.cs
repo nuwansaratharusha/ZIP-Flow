@@ -192,10 +192,21 @@ public sealed class MenuService(AppDbContext db) : IMenuService
     public async Task<CategoryDto> FindOrCreateCategoryAsync(Guid tenantId, string name, int sortOrder, CancellationToken ct)
     {
         var trimmed = name.Trim();
+        // Match INCLUDING soft-deleted rows: the unique index on (TenantId, Name)
+        // covers inactive categories too, so reuse (and reactivate) an existing name
+        // rather than trying to insert a duplicate.
         var existing = await db.Categories.FirstOrDefaultAsync(
-            x => x.TenantId == tenantId && x.IsActive && x.Name.ToLower() == trimmed.ToLower(), ct);
+            x => x.TenantId == tenantId && x.Name.ToLower() == trimmed.ToLower(), ct);
         if (existing is not null)
+        {
+            if (!existing.IsActive)
+            {
+                existing.IsActive = true;
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+            }
             return new CategoryDto(existing.Id, existing.Name, existing.SortOrder);
+        }
 
         return await CreateCategoryAsync(tenantId, trimmed, sortOrder, ct);
     }
